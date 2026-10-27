@@ -77,8 +77,8 @@ private val tools = listOf(
     PdfTool("split", "Dividir PDF", "Split PDF", "Extrai páginas por intervalo", "Extract pages by range", Blue, Icons.Filled.ContentCut, true),
     PdfTool("image", "Imagem para PDF", "Image to PDF", "Cria um PDF a partir de imagens", "Create a PDF from images", Cyan, Icons.Filled.Image, true),
     PdfTool("rotate", "Rodar páginas", "Rotate pages", "Roda páginas 90° no sentido horário", "Rotate pages 90° clockwise", Orange, Icons.Filled.RotateRight, true),
-    PdfTool("compress", "Comprimir PDF", "Compress PDF", "Reduz o tamanho do documento", "Reduce document size", Blue, Icons.Filled.Compress),
-    PdfTool("edit", "Editar e anotar", "Edit & annotate", "Texto, desenhos e realces", "Text, drawings and highlights", Pink, Icons.Filled.Edit),
+    PdfTool("compress", "Comprimir PDF", "Compress PDF", "Reduz o tamanho do documento", "Reduce document size", Blue, Icons.Filled.Compress, true),
+    PdfTool("edit", "Editar e assinar", "Annotate & sign", "Adiciona texto ou assinatura", "Add text or a drawn signature", Pink, Icons.Filled.Edit, true),
     PdfTool("scan", "Digitalizar", "Scan document", "Captura documentos pela câmara", "Capture documents with the camera", Cyan, Icons.Filled.CameraAlt),
     PdfTool("protect", "Proteger PDF", "Protect PDF", "Proteção por palavra-passe", "Password protection", Violet, Icons.Filled.Lock),
     PdfTool("ocr", "OCR", "OCR", "Torna digitalizações pesquisáveis", "Make scans searchable", Blue, Icons.Filled.Search),
@@ -112,6 +112,8 @@ private fun NexaPdfApp() {
     var showRotate by remember { mutableStateOf(false) }
     var editUri by remember { mutableStateOf<Uri?>(null) }
     var showEditDialog by remember { mutableStateOf(false) }
+    var compressionUri by remember { mutableStateOf<Uri?>(null) }
+    var showCompressionDialog by remember { mutableStateOf(false) }
     var showAbout by remember { mutableStateOf(false) }
     val recentDocs = remember {
         mutableStateListOf<Recent>().apply {
@@ -202,6 +204,9 @@ private fun NexaPdfApp() {
     val rotatePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { rotateCallback(it) }
     var editCallback by remember { mutableStateOf<(Uri?) -> Unit>({}) }
     val editPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { editCallback(it) }
+    val compressionPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) { compressionUri = uri; showCompressionDialog = true }
+    }
 
     mergeCallback = { uris ->
         if (uris.size >= 2) runOperation(if (pt) "A juntar PDFs…" else "Merging PDFs…") { PdfOperations.merge(context, uris) }
@@ -233,6 +238,7 @@ private fun NexaPdfApp() {
             "split" -> splitPicker.launch(arrayOf("application/pdf"))
             "rotate" -> rotatePicker.launch(arrayOf("application/pdf"))
             "edit" -> editPicker.launch(arrayOf("application/pdf"))
+            "compress" -> compressionPicker.launch(arrayOf("application/pdf"))
             else -> scope.launch {
                 snackbar.showSnackbar(if (pt) "Esta ferramenta está em desenvolvimento e ainda não está ativa." else "This tool is in development and is not active yet.")
             }
@@ -347,6 +353,21 @@ private fun NexaPdfApp() {
         )
     }
 
+    if (showCompressionDialog && compressionUri != null) {
+        PdfCompressionDialog(
+            pt = pt,
+            fileName = PdfOperations.displayName(context, compressionUri!!),
+            onDismiss = { showCompressionDialog = false },
+            onCompress = { maxDimension, jpegQuality ->
+                val uri = compressionUri
+                showCompressionDialog = false
+                if (uri != null) runOperation(if (pt) "A comprimir PDF…" else "Compressing PDF…") {
+                    PdfOperations.compressRasterizedPdf(context, uri, maxDimension, jpegQuality)
+                }
+            }
+        )
+    }
+
     if (showAbout) AlertDialog(
         onDismissRequest = { showAbout = false }, containerColor = Panel,
         title = { Text("NexaPDF · 0.1.0", color = Color.White) },
@@ -358,6 +379,73 @@ private fun NexaPdfApp() {
         onDismissRequest = {}, containerColor = Panel, confirmButton = {},
         title = { Text(busyText, color = Color.White) },
         text = { Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) { CircularProgressIndicator(color = Cyan, modifier = Modifier.size(26.dp)); Text(if (pt) "A processar no dispositivo…" else "Processing on this device…", color = SecondaryText) } }
+    )
+}
+
+@Composable
+private fun PdfCompressionDialog(
+    pt: Boolean,
+    fileName: String,
+    onDismiss: () -> Unit,
+    onCompress: (Int, Int) -> Unit
+) {
+    var preset by remember { mutableStateOf("balanced") }
+    val settings = when (preset) {
+        "small" -> 900 to 52
+        "sharp" -> 1600 to 84
+        else -> 1200 to 68
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Panel,
+        title = {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(if (pt) "Comprimir PDF" else "Compress PDF", color = Color.White, fontWeight = FontWeight.Bold)
+                Text(fileName, color = SecondaryText, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(if (pt) "Escolhe a qualidade de saída." else "Choose the output quality.", color = SecondaryText, fontSize = 13.sp)
+                listOf(
+                    Triple("small", if (pt) "Mais pequeno" else "Smallest", if (pt) "900 px · menor qualidade" else "900 px · lower quality"),
+                    Triple("balanced", if (pt) "Equilibrado" else "Balanced", if (pt) "1200 px · recomendado" else "1200 px · recommended"),
+                    Triple("sharp", if (pt) "Mais nítido" else "Sharper", if (pt) "1600 px · maior qualidade" else "1600 px · higher quality")
+                ).forEach { option ->
+                    Surface(
+                        color = if (preset == option.first) Violet.copy(alpha = 0.20f) else PanelAlt,
+                        shape = RoundedCornerShape(12.dp),
+                        border = if (preset == option.first) androidx.compose.foundation.BorderStroke(1.dp, Violet) else null,
+                        modifier = Modifier.fillMaxWidth().clickable { preset = option.first }
+                    ) {
+                        Row(Modifier.padding(11.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                            RadioButton(selected = preset == option.first, onClick = { preset = option.first }, colors = RadioButtonDefaults.colors(selectedColor = Cyan))
+                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Text(option.second, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                                Text(option.third, color = SecondaryText, fontSize = 11.sp)
+                            }
+                        }
+                    }
+                }
+                Surface(color = Color(0xFF36251D), shape = RoundedCornerShape(12.dp)) {
+                    Row(Modifier.padding(11.dp), verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Icon(Icons.Filled.WarningAmber, null, tint = Orange, modifier = Modifier.size(20.dp))
+                        Text(
+                            if (pt) "Este modo converte as páginas em imagens. O texto deixa de ser selecionável/pesquisável e formulários, links e conteúdo vetorial não são preservados. O original fica intacto. Só guardaremos o resultado se ficar mais pequeno." else "This mode converts pages into images. Text will no longer be selectable/searchable, and forms, links and vector content are not preserved. Your original stays intact. The result is saved only if it is smaller.",
+                            color = Color(0xFFFFD9C8), fontSize = 11.sp, lineHeight = 15.sp
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = { onCompress(settings.first, settings.second) }, colors = ButtonDefaults.buttonColors(containerColor = Violet)) {
+                Text(if (pt) "Comprimir e guardar" else "Compress and save")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(if (pt) "Cancelar" else "Cancel") }
+        }
     )
 }
 
