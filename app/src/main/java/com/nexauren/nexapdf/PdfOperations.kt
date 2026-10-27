@@ -88,11 +88,9 @@ object PdfOperations {
         val output = File.createTempFile("nexapdf_pages_", ".pdf", context.cacheDir)
         PDDocument.load(input).use { source ->
             val count = source.numberOfPages
-            require(firstPage in 1..count && lastPage in firstPage..count) {
-                "Enter a page range from 1 to $count."
-            }
+            val range = PageRange.of(firstPage, lastPage, count)
             PDDocument().use { destination ->
-                for (index in (firstPage - 1) until lastPage) {
+                for (index in (range.firstPage - 1) until range.lastPage) {
                     destination.importPage(source.getPage(index))
                 }
                 destination.save(output)
