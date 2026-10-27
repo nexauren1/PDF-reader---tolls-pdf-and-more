@@ -19,6 +19,9 @@ import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.pdmodel.PDPage
 import com.tom_roush.pdfbox.pdmodel.common.PDRectangle
 import com.tom_roush.pdfbox.pdmodel.PDPageContentStream
+import com.tom_roush.pdfbox.pdmodel.encryption.AccessPermission
+import com.tom_roush.pdfbox.pdmodel.encryption.StandardProtectionPolicy
+import com.tom_roush.pdfbox.rendering.PDFRenderer
 import com.tom_roush.pdfbox.pdmodel.graphics.image.PDImageXObject
 import com.tom_roush.pdfbox.pdmodel.font.PDType1Font
 import com.tom_roush.pdfbox.pdmodel.graphics.image.LosslessFactory
@@ -26,6 +29,7 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
 import kotlin.math.min
+import java.util.UUID
 
 /** Local-first PDF operations. Files stay in app cache until the user chooses where to save them. */
 object PdfOperations {
@@ -55,40 +59,41 @@ object PdfOperations {
         return result
     }
 
-    fun pageCount(context: Context, uri: Uri): Int {
+    fun pageCount(context: Context, uri: Uri, password: String? = null): Int {
         val file = copyUriToCache(context, uri)
         return try {
-            val descriptor = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
-            descriptor.use { pfd -> PdfRenderer(pfd).use { renderer -> renderer.pageCount } }
+            openPdfDocument(file, password).use { document -> document.numberOfPages }
         } finally {
             file.delete()
         }
     }
 
-    fun renderPage(context: Context, uri: Uri, pageIndex: Int, maxWidth: Int = 1200): Bitmap {
+    fun renderPage(context: Context, uri: Uri, pageIndex: Int, password: String? = null, maxWidth: Int = 1200): Bitmap {
         val file = copyUriToCache(context, uri)
         return try {
-            val descriptor = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
-            descriptor.use { pfd ->
-                PdfRenderer(pfd).use { renderer ->
-                    require(renderer.pageCount > 0) { "This PDF has no pages." }
-                    val safeIndex = pageIndex.coerceIn(0, renderer.pageCount - 1)
-                    renderer.openPage(safeIndex).use { page ->
-                        val width = min(page.width, maxWidth).coerceAtLeast(1)
-                        val height = (width.toFloat() * page.height / page.width).toInt().coerceAtLeast(1)
-                        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-                        val canvas = android.graphics.Canvas(bitmap)
-                        canvas.drawColor(Color.WHITE)
-                        val transform = android.graphics.Matrix().apply {
-                            setScale(width.toFloat() / page.width, height.toFloat() / page.height)
-                        }
-                        page.render(bitmap, null, transform, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-                        bitmap
-                    }
-                }
+            openPdfDocument(file, password).use { document ->
+                require(document.numberOfPages > 0) { "This PDF has no pages." }
+                val safeIndex = pageIndex.coerceIn(0, document.numberOfPages - 1)
+                val cropBox = document.getPage(safeIndex).cropBox
+                val longestSide = maxOf(cropBox.width, cropBox.height).coerceAtLeast(1f)
+                val scale = min(maxWidth.toFloat() / longestSide, 2f).coerceAtLeast(0.5f)
+                PDFRenderer(document).renderImage(safeIndex, scale)
             }
         } finally {
             file.delete()
+        }
+    }
+
+    private fun openPdfDocument(file: File, password: String?): PDDocument {
+        return try {
+            PDDocument.load(file, password.orEmpty(), MemoryUsageSetting.setupTempFileOnly())
+        } catch (error: Exception) {
+            val message = error.message.orEmpty().lowercase()
+            if (error.javaClass.simpleName.contains("InvalidPassword", ignoreCase = true) ||
+                message.contains("password") || message.contains("decrypt")) {
+                throw PdfPasswordRequiredException(error)
+            }
+            throw error
         }
     }
 
@@ -148,6 +153,39 @@ object PdfOperations {
                 document.save(output)
             }
             require(output.length() > 0L) { "The rotated PDF could not be created." }
+            return output
+        } catch (error: Exception) {
+            output.delete()
+            throw error
+        } finally {
+            input.delete()
+        }
+    }
+
+    fun protectWithPassword(context: Context, uri: Uri, password: String): File {
+        validatePdfPassword(password)
+        prepare(context)
+        val input = copyUriToCache(context, uri)
+        val output = File.createTempFile("nexapdf_protected_", ".pdf", context.cacheDir)
+        try {
+            PDDocument.load(input, "", MemoryUsageSetting.setupTempFileOnly()).use { document ->
+                require(document.numberOfPages > 0) { "This PDF has no pages." }
+                val permissions = AccessPermission().apply {
+                    setCanPrint(true)
+                    setCanPrintFaithful(true)
+                    setCanModify(false)
+                    setCanModifyAnnotations(false)
+                    setCanExtractContent(false)
+                    setCanFillInForm(false)
+                    setCanAssembleDocument(false)
+                }
+                val ownerPassword = UUID.randomUUID().toString() + UUID.randomUUID().toString()
+                val policy = StandardProtectionPolicy(ownerPassword, password, permissions)
+                policy.setEncryptionKeyLength(128)
+                document.protect(policy)
+                document.save(output)
+            }
+            require(output.exists() && output.length() > 0L) { "The protected PDF could not be created." }
             return output
         } catch (error: Exception) {
             output.delete()
@@ -354,4 +392,12 @@ internal fun normalizePdfAnnotationText(raw: String): String {
         .trim()
     require(normalized.isNotBlank()) { "Enter text to add to the PDF." }
     return normalized.take(180)
+}
+
+
+internal class PdfPasswordRequiredException(cause: Throwable) : Exception("This PDF requires a valid password.", cause)
+
+internal fun validatePdfPassword(password: String) {
+    require(password.length >= 8) { "Use at least 8 characters for the PDF password." }
+    require(password.isNotBlank()) { "Password cannot be blank." }
 }
