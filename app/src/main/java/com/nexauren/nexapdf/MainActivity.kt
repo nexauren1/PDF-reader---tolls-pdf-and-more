@@ -204,7 +204,11 @@ private fun NexaPdfApp() {
 
     val savePicker = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) { destination ->
         val source = pendingFile
-        if (destination != null && source != null) scope.launch {
+        if (destination == null) {
+            // The user cancelled the save picker; remove the temporary result file.
+            source?.delete()
+            pendingFile = null
+        } else if (source != null) scope.launch {
             try {
                 busy = true
                 busyText = if (pt) "A guardar PDF…" else "Saving PDF…"
@@ -224,7 +228,13 @@ private fun NexaPdfApp() {
                 snackbar.showSnackbar(if (pt) "PDF guardado com sucesso." else "PDF saved successfully.")
             } catch (e: Exception) {
                 snackbar.showSnackbar(e.message ?: if (pt) "Falha ao guardar." else "Could not save file.")
-            } finally { busy = false; pendingFile = null }
+            } finally {
+                source.delete()
+                busy = false
+                pendingFile = null
+            }
+        } else {
+            snackbar.showSnackbar(if (pt) "O resultado temporário já não está disponível." else "The temporary result is no longer available.")
         }
     }
 
