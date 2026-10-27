@@ -505,6 +505,22 @@ private fun NexaPdfApp() {
         )
     }
 
+    if (showReaderSearch && activeUri != null) {
+        PdfSearchDialog(
+            pt = pt,
+            query = readerSearchQuery,
+            results = readerSearchHits,
+            isSearching = searchingInPdf,
+            onQueryChange = { readerSearchQuery = it; readerSearchHits = emptyList() },
+            onSearch = { searchCurrentPdf(readerSearchQuery) },
+            onOpenResult = { hit ->
+                showReaderSearch = false
+                activeUri?.let { loadPdf(it, hit.pageNumber - 1, activeName, activePassword) }
+            },
+            onDismiss = { showReaderSearch = false }
+        )
+    }
+
     if (showOcrDialog && ocrUri != null) {
         PdfOcrDialog(
             pt = pt,
@@ -562,6 +578,83 @@ private fun NexaPdfApp() {
         onDismissRequest = {}, containerColor = Panel, confirmButton = {},
         title = { Text(busyText, color = Color.White) },
         text = { Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) { CircularProgressIndicator(color = Cyan, modifier = Modifier.size(26.dp)); Text(if (pt) "A processar no dispositivo…" else "Processing on this device…", color = SecondaryText) } }
+    )
+}
+
+@Composable
+private fun PdfSearchDialog(
+    pt: Boolean,
+    query: String,
+    results: List<PdfSearchHit>,
+    isSearching: Boolean,
+    onQueryChange: (String) -> Unit,
+    onSearch: () -> Unit,
+    onOpenResult: (PdfSearchHit) -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Panel,
+        title = { Text(if (pt) "Pesquisar no PDF" else "Search this PDF", color = Color.White, fontWeight = FontWeight.Bold) },
+        text = {
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = onQueryChange,
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    label = { Text(if (pt) "Texto a procurar" else "Search text") },
+                    trailingIcon = {
+                        IconButton(onClick = onSearch, enabled = query.isNotBlank() && !isSearching) {
+                            Icon(Icons.Filled.Search, null, tint = Cyan)
+                        }
+                    },
+                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Violet, unfocusedBorderColor = PanelAlt, focusedTextColor = Color.White, unfocusedTextColor = Color.White)
+                )
+                when {
+                    isSearching -> {
+                        LinearProgressIndicator(Modifier.fillMaxWidth(), color = Cyan)
+                        Text(if (pt) "A pesquisar localmente…" else "Searching locally…", color = SecondaryText, fontSize = 12.sp)
+                    }
+                    results.isNotEmpty() -> {
+                        Text(
+                            results.size.toString() + (if (pt) " página(s) com resultados" else " page(s) with matches"),
+                            color = Cyan, fontSize = 11.sp, fontWeight = FontWeight.SemiBold
+                        )
+                        LazyColumn(Modifier.fillMaxWidth().heightIn(max = 240.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                            items(results, key = { it.pageNumber }) { hit ->
+                                Surface(
+                                    color = PanelAlt,
+                                    shape = RoundedCornerShape(11.dp),
+                                    modifier = Modifier.fillMaxWidth().clickable { onOpenResult(hit) }
+                                ) {
+                                    Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        Text((if (pt) "Página " else "Page ") + hit.pageNumber, color = Cyan, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                                        Text(hit.snippet, color = Color.White, fontSize = 12.sp, lineHeight = 16.sp)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    query.isNotBlank() -> {
+                        Text(
+                            if (pt) "Não foram encontrados resultados. Se for uma digitalização, executa primeiro o OCR offline." else "No matches found. If this is a scan, run Offline OCR first.",
+                            color = SecondaryText, fontSize = 12.sp, lineHeight = 17.sp
+                        )
+                    }
+                    else -> Text(
+                        if (pt) "A pesquisa é feita no dispositivo e não envia o documento para um servidor." else "Search runs on this device and does not upload the document.",
+                        color = SecondaryText, fontSize = 12.sp
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = onSearch, enabled = query.isNotBlank() && !isSearching, colors = ButtonDefaults.buttonColors(containerColor = Violet)) {
+                Text(if (pt) "Pesquisar" else "Search")
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(if (pt) "Fechar" else "Close") } }
     )
 }
 
