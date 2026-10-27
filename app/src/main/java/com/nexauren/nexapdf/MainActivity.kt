@@ -2,6 +2,9 @@ package com.nexauren.nexapdf
 
 import android.content.Intent
 import android.graphics.Bitmap
+import android.graphics.Canvas as AndroidCanvas
+import android.graphics.Paint as AndroidPaint
+import android.graphics.Path as AndroidPath
 import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -9,6 +12,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -24,12 +29,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -100,6 +110,8 @@ private fun NexaPdfApp() {
     var showSplit by remember { mutableStateOf(false) }
     var rotateUri by remember { mutableStateOf<Uri?>(null) }
     var showRotate by remember { mutableStateOf(false) }
+    var editUri by remember { mutableStateOf<Uri?>(null) }
+    var showEditDialog by remember { mutableStateOf(false) }
     var showAbout by remember { mutableStateOf(false) }
     val recentDocs = remember {
         mutableStateListOf<Recent>().apply {
@@ -188,6 +200,8 @@ private fun NexaPdfApp() {
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { imageCallback(it) }
     val splitPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { splitCallback(it) }
     val rotatePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { rotateCallback(it) }
+    var editCallback by remember { mutableStateOf<(Uri?) -> Unit>({}) }
+    val editPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { editCallback(it) }
 
     mergeCallback = { uris ->
         if (uris.size >= 2) runOperation(if (pt) "A juntar PDFs…" else "Merging PDFs…") { PdfOperations.merge(context, uris) }
@@ -209,6 +223,7 @@ private fun NexaPdfApp() {
         }
     }
     rotateCallback = { uri -> if (uri != null) { rotateUri = uri; showRotate = true } }
+    editCallback = { uri -> if (uri != null) { editUri = uri; showEditDialog = true } }
 
     fun launchTool(id: String) {
         when (id) {
@@ -217,6 +232,7 @@ private fun NexaPdfApp() {
             "image" -> imagePicker.launch(arrayOf("image/*"))
             "split" -> splitPicker.launch(arrayOf("application/pdf"))
             "rotate" -> rotatePicker.launch(arrayOf("application/pdf"))
+            "edit" -> editPicker.launch(arrayOf("application/pdf"))
             else -> scope.launch {
                 snackbar.showSnackbar(if (pt) "Esta ferramenta está em desenvolvimento e ainda não está ativa." else "This tool is in development and is not active yet.")
             }
@@ -309,6 +325,28 @@ private fun NexaPdfApp() {
         dismissButton = { TextButton(onClick = { showRotate = false }) { Text(if (pt) "Cancelar" else "Cancel") } }
     )
 
+    if (showEditDialog && editUri != null) {
+        PdfEditDialog(
+            pt = pt,
+            fileName = PdfOperations.displayName(context, editUri!!),
+            onDismiss = { showEditDialog = false },
+            onApplyText = { pageNumber, text ->
+                val uri = editUri
+                showEditDialog = false
+                if (uri != null) runOperation(if (pt) "A adicionar texto…" else "Adding text…") {
+                    PdfOperations.addTextAnnotation(context, uri, pageNumber, text)
+                }
+            },
+            onApplySignature = { pageNumber, bitmap ->
+                val uri = editUri
+                showEditDialog = false
+                if (uri != null) runOperation(if (pt) "A inserir assinatura…" else "Adding signature…") {
+                    PdfOperations.addSignature(context, uri, pageNumber, bitmap)
+                }
+            }
+        )
+    }
+
     if (showAbout) AlertDialog(
         onDismissRequest = { showAbout = false }, containerColor = Panel,
         title = { Text("NexaPDF · 0.1.0", color = Color.White) },
@@ -321,6 +359,156 @@ private fun NexaPdfApp() {
         title = { Text(busyText, color = Color.White) },
         text = { Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) { CircularProgressIndicator(color = Cyan, modifier = Modifier.size(26.dp)); Text(if (pt) "A processar no dispositivo…" else "Processing on this device…", color = SecondaryText) } }
     )
+}
+
+@Composable
+private fun PdfEditDialog(
+    pt: Boolean,
+    fileName: String,
+    onDismiss: () -> Unit,
+    onApplyText: (Int, String) -> Unit,
+    onApplySignature: (Int, Bitmap) -> Unit
+) {
+    var mode by remember { mutableStateOf("text") }
+    var noteText by remember { mutableStateOf("") }
+    var pageText by remember { mutableStateOf("1") }
+    val strokes = remember { mutableStateListOf<MutableList<Offset>>() }
+    var canvasSize by remember { mutableStateOf(IntSize.Zero) }
+    val hasSignature = strokes.any { it.isNotEmpty() }
+    val pageNumber = pageText.toIntOrNull()
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Panel,
+        title = {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(if (pt) "Editar PDF" else "Edit PDF", color = Color.White, fontWeight = FontWeight.Bold)
+                Text(fileName, color = SecondaryText, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        },
+        text = {
+            Column(
+                Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(11.dp)
+            ) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(
+                        selected = mode == "text",
+                        onClick = { mode = "text" },
+                        label = { Text(if (pt) "Texto" else "Text") },
+                        leadingIcon = { Icon(Icons.Filled.TextFields, null) }
+                    )
+                    FilterChip(
+                        selected = mode == "signature",
+                        onClick = { mode = "signature" },
+                        label = { Text(if (pt) "Assinatura" else "Signature") },
+                        leadingIcon = { Icon(Icons.Filled.Draw, null) }
+                    )
+                }
+                OutlinedTextField(
+                    value = pageText,
+                    onValueChange = { pageText = it.filter(Char::isDigit).take(5) },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    label = { Text(if (pt) "Número da página" else "Page number") },
+                    supportingText = { Text(if (pt) "A página escolhida recebe o conteúdo na margem inferior." else "The selected page receives content near its bottom margin.") }
+                )
+                if (mode == "text") {
+                    OutlinedTextField(
+                        value = noteText,
+                        onValueChange = { noteText = it.take(240) },
+                        modifier = Modifier.fillMaxWidth(),
+                        minLines = 2,
+                        maxLines = 4,
+                        label = { Text(if (pt) "Texto a adicionar" else "Text to add") },
+                        placeholder = { Text(if (pt) "Escreve uma nota curta…" else "Write a short note…") },
+                        supportingText = { Text(if (pt) "Até 180 caracteres; o ficheiro original é mantido." else "Up to 180 characters; the original stays unchanged.") }
+                    )
+                } else {
+                    Text(
+                        if (pt) "Desenha a assinatura com o dedo na área branca." else "Draw your signature with a finger in the white area.",
+                        color = SecondaryText,
+                        fontSize = 12.sp
+                    )
+                    Canvas(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(145.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Color.White)
+                            .pointerInput(mode) {
+                                detectDragGestures(
+                                    onDragStart = { point -> strokes.add(mutableStateListOf(point)) },
+                                    onDrag = { change, _ ->
+                                        change.consume()
+                                        strokes.lastOrNull()?.add(change.position)
+                                    }
+                                )
+                            }
+                    ) {
+                        canvasSize = IntSize(size.width.toInt().coerceAtLeast(1), size.height.toInt().coerceAtLeast(1))
+                        strokes.forEach { points ->
+                            if (points.size == 1) {
+                                drawCircle(Color(0xFF14263D), radius = 2.5f, center = points.first())
+                            } else if (points.size > 1) {
+                                val path = Path().apply {
+                                    moveTo(points.first().x, points.first().y)
+                                    points.drop(1).forEach { lineTo(it.x, it.y) }
+                                }
+                                drawPath(path, color = Color(0xFF14263D), style = Stroke(width = 4f))
+                            }
+                        }
+                    }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                        TextButton(onClick = { strokes.clear() }) {
+                            Icon(Icons.Filled.Refresh, null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(5.dp))
+                            Text(if (pt) "Limpar assinatura" else "Clear signature")
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                enabled = pageNumber != null && pageNumber > 0 && if (mode == "text") noteText.isNotBlank() else hasSignature && canvasSize.width > 0 && canvasSize.height > 0,
+                onClick = {
+                    val page = pageNumber ?: return@Button
+                    if (mode == "text") onApplyText(page, noteText)
+                    else onApplySignature(page, createSignatureBitmap(strokes, canvasSize))
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = Violet)
+            ) { Text(if (pt) "Aplicar e guardar" else "Apply and save") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(if (pt) "Cancelar" else "Cancel") }
+        }
+    )
+}
+
+private fun createSignatureBitmap(strokes: List<List<Offset>>, size: IntSize): Bitmap {
+    val width = 900
+    val height = 280
+    val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+    val canvas = AndroidCanvas(bitmap)
+    val paint = AndroidPaint(AndroidPaint.ANTI_ALIAS_FLAG).apply {
+        color = android.graphics.Color.rgb(20, 38, 61)
+        style = AndroidPaint.Style.STROKE
+        strokeWidth = 8f
+        strokeCap = AndroidPaint.Cap.ROUND
+        strokeJoin = AndroidPaint.Join.ROUND
+    }
+    val scaleX = width.toFloat() / size.width.coerceAtLeast(1)
+    val scaleY = height.toFloat() / size.height.coerceAtLeast(1)
+    strokes.forEach { points ->
+        if (points.isNotEmpty()) {
+            val path = AndroidPath()
+            path.moveTo(points.first().x * scaleX, points.first().y * scaleY)
+            points.drop(1).forEach { path.lineTo(it.x * scaleX, it.y * scaleY) }
+            canvas.drawPath(path, paint)
+        }
+    }
+    return bitmap
 }
 
 @Composable
