@@ -27,6 +27,7 @@ import com.tom_roush.pdfbox.pdmodel.encryption.AccessPermission
 import com.tom_roush.pdfbox.pdmodel.encryption.StandardProtectionPolicy
 import com.tom_roush.pdfbox.pdmodel.graphics.state.RenderingMode
 import com.tom_roush.pdfbox.rendering.PDFRenderer
+import com.tom_roush.pdfbox.text.PDFTextStripper
 import com.tom_roush.pdfbox.pdmodel.graphics.image.PDImageXObject
 import com.tom_roush.pdfbox.pdmodel.font.PDType1Font
 import com.tom_roush.pdfbox.pdmodel.graphics.image.LosslessFactory
@@ -99,6 +100,33 @@ object PdfOperations {
                 throw PdfPasswordRequiredException(error)
             }
             throw error
+        }
+    }
+
+    fun searchText(context: Context, uri: Uri, query: String, password: String? = null): List<PdfSearchHit> {
+        val cleanQuery = query.trim()
+        require(cleanQuery.isNotEmpty()) { "Enter text to search for." }
+        prepare(context)
+        val input = copyUriToCache(context, uri)
+        try {
+            return openPdfDocument(input, password).use { document ->
+                val hits = mutableListOf<PdfSearchHit>()
+                for (index in 0 until document.numberOfPages) {
+                    val stripper = PDFTextStripper().apply {
+                        startPage = index + 1
+                        endPage = index + 1
+                    }
+                    val pageText = stripper.getText(document)
+                    val snippet = findPdfSearchSnippet(pageText, cleanQuery)
+                    if (snippet != null) {
+                        hits += PdfSearchHit(pageNumber = index + 1, snippet = snippet)
+                        if (hits.size >= 100) break
+                    }
+                }
+                hits
+            }
+        } finally {
+            input.delete()
         }
     }
 
@@ -476,6 +504,22 @@ internal fun normalizePdfAnnotationText(raw: String): String {
         .trim()
     require(normalized.isNotBlank()) { "Enter text to add to the PDF." }
     return normalized.take(180)
+}
+
+
+data class PdfSearchHit(val pageNumber: Int, val snippet: String)
+
+internal fun findPdfSearchSnippet(pageText: String, query: String): String? {
+    val search = query.trim()
+    if (search.isEmpty()) return null
+    val normalizedText = pageText.replace(Regex("\\s+"), " ").trim()
+    val index = normalizedText.indexOf(search, ignoreCase = true)
+    if (index < 0) return null
+    val start = (index - 48).coerceAtLeast(0)
+    val end = (index + search.length + 72).coerceAtMost(normalizedText.length)
+    val prefix = if (start > 0) "…" else ""
+    val suffix = if (end < normalizedText.length) "…" else ""
+    return prefix + normalizedText.substring(start, end) + suffix
 }
 
 
