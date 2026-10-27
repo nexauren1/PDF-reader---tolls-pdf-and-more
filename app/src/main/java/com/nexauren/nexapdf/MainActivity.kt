@@ -132,6 +132,10 @@ private fun NexaPdfApp() {
     var passwordName by remember { mutableStateOf("") }
     var passwordWasWrong by remember { mutableStateOf(false) }
     var showPasswordDialog by remember { mutableStateOf(false) }
+    var showReaderSearch by remember { mutableStateOf(false) }
+    var readerSearchQuery by remember { mutableStateOf("") }
+    var readerSearchHits by remember { mutableStateOf<List<PdfSearchHit>>(emptyList()) }
+    var searchingInPdf by remember { mutableStateOf(false) }
     var showAbout by remember { mutableStateOf(false) }
     val recentDocs = remember {
         mutableStateListOf<Recent>().apply {
@@ -332,6 +336,27 @@ private fun NexaPdfApp() {
                     )
                 }
             }
+    }
+
+    fun searchCurrentPdf(text: String) {
+        val uri = activeUri ?: return
+        if (text.isBlank()) {
+            scope.launch { snackbar.showSnackbar(if (pt) "Escreve o texto que queres procurar." else "Enter text to search for.") }
+            return
+        }
+        scope.launch {
+            searchingInPdf = true
+            try {
+                readerSearchHits = withContext(Dispatchers.IO) {
+                    PdfOperations.searchText(context, uri, text, activePassword)
+                }
+            } catch (error: Exception) {
+                readerSearchHits = emptyList()
+                snackbar.showSnackbar(error.message ?: if (pt) "Não foi possível pesquisar este PDF." else "Could not search this PDF.")
+            } finally {
+                searchingInPdf = false
+            }
+        }
     }
 
     fun launchTool(id: String) {
