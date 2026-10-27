@@ -1,5 +1,6 @@
 package com.nexauren.nexapdf
 
+import android.app.Activity
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Canvas as AndroidCanvas
@@ -10,6 +11,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.Canvas
@@ -44,6 +46,9 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import com.google.mlkit.vision.documentscanner.GmsDocumentScanning
+import com.google.mlkit.vision.documentscanner.GmsDocumentScanningResult
+import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions
 import java.io.File
 
 private val AppBg = Color(0xFF07111F)
@@ -79,7 +84,7 @@ private val tools = listOf(
     PdfTool("rotate", "Rodar páginas", "Rotate pages", "Roda páginas 90° no sentido horário", "Rotate pages 90° clockwise", Orange, Icons.Filled.RotateRight, true),
     PdfTool("compress", "Comprimir PDF", "Compress PDF", "Reduz o tamanho do documento", "Reduce document size", Blue, Icons.Filled.Compress, true),
     PdfTool("edit", "Editar e assinar", "Annotate & sign", "Adiciona texto ou assinatura", "Add text or a drawn signature", Pink, Icons.Filled.Edit, true),
-    PdfTool("scan", "Digitalizar", "Scan document", "Captura documentos pela câmara", "Capture documents with the camera", Cyan, Icons.Filled.CameraAlt),
+    PdfTool("scan", "Digitalizar", "Scan document", "Captura e corrige documentos", "Capture and crop documents", Cyan, Icons.Filled.CameraAlt, true),
     PdfTool("protect", "Proteger PDF", "Protect PDF", "Proteção por palavra-passe", "Password protection", Violet, Icons.Filled.Lock),
     PdfTool("ocr", "OCR", "OCR", "Torna digitalizações pesquisáveis", "Make scans searchable", Blue, Icons.Filled.Search),
     PdfTool("translate", "Traduzir PDF", "Translate PDF", "Tradução online opcional", "Optional online translation", Pink, Icons.Filled.Translate)
@@ -161,6 +166,16 @@ private fun NexaPdfApp() {
         }
     }
 
+    val scannerOptions = remember {
+        GmsDocumentScannerOptions.Builder()
+            .setGalleryImportAllowed(true)
+            .setPageLimit(50)
+            .setResultFormats(GmsDocumentScannerOptions.RESULT_FORMAT_PDF)
+            .setScannerMode(GmsDocumentScannerOptions.SCANNER_MODE_FULL)
+            .build()
+    }
+    val documentScanner = remember { GmsDocumentScanning.getClient(scannerOptions) }
+
     val savePicker = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) { destination ->
         val source = pendingFile
         if (destination != null && source != null) scope.launch {
@@ -172,6 +187,14 @@ private fun NexaPdfApp() {
                         ?: throw IllegalArgumentException("Could not write to this location.")
                     stream.use { out -> source.inputStream().use { it.copyTo(out) } }
                 }
+                try {
+                    context.contentResolver.takePersistableUriPermission(
+                        destination,
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                    )
+                } catch (_: Exception) { }
+                val savedName = PdfOperations.displayName(context, destination)
+                rememberRecent(destination, savedName)
                 snackbar.showSnackbar(if (pt) "PDF guardado com sucesso." else "PDF saved successfully.")
             } catch (e: Exception) {
                 snackbar.showSnackbar(e.message ?: if (pt) "Falha ao guardar." else "Could not save file.")
@@ -230,6 +253,62 @@ private fun NexaPdfApp() {
     rotateCallback = { uri -> if (uri != null) { rotateUri = uri; showRotate = true } }
     editCallback = { uri -> if (uri != null) { editUri = uri; showEditDialog = true } }
 
+    val scanResultLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val pdfUri = result.data
+                ?.let { GmsDocumentScanningResult.fromActivityResultIntent(it) }
+                ?.pdf
+                ?.uri
+            if (pdfUri == null) {
+                scope.launch { snackbar.showSnackbar(if (pt) "O scanner não devolveu um PDF." else "The scanner did not return a PDF.") }
+            } else {
+                scope.launch {
+                    try {
+                        busy = true
+                        busyText = if (pt) "A preparar digitalização…" else "Preparing scan…"
+                        val cachedPdf = withContext(Dispatchers.IO) {
+                            PdfOperations.copyUriToCache(context, pdfUri)
+                        }
+                        pendingFile = cachedPdf
+                        savePicker.launch("NexaPDF_Scan.pdf")
+                    } catch (error: Exception) {
+                        snackbar.showSnackbar(error.message ?: if (pt) "Não foi possível preparar a digitalização." else "Could not prepare the scan.")
+                    } finally {
+                        busy = false
+                    }
+                }
+            }
+        } else {
+            busy = false
+        }
+    }
+
+    fun startDocumentScanner() {
+        val activity = context as? Activity
+        if (activity == null) {
+            scope.launch { snackbar.showSnackbar(if (pt) "Não foi possível abrir o scanner neste ecrã." else "Could not launch the scanner from this screen.") }
+            return
+        }
+        busy = true
+        busyText = if (pt) "A preparar scanner…" else "Preparing scanner…"
+        documentScanner.getStartScanIntent(activity)
+            .addOnSuccessListener { sender ->
+                busy = false
+                scanResultLauncher.launch(IntentSenderRequest.Builder(sender).build())
+            }
+            .addOnFailureListener { error ->
+                busy = false
+                scope.launch {
+                    snackbar.showSnackbar(
+                        error.localizedMessage
+                            ?: if (pt) "O scanner não está disponível. Verifica os Google Play services." else "Scanner unavailable. Check Google Play services."
+                    )
+                }
+            }
+    }
+
     fun launchTool(id: String) {
         when (id) {
             "open" -> openPicker.launch(arrayOf("application/pdf"))
@@ -239,6 +318,7 @@ private fun NexaPdfApp() {
             "rotate" -> rotatePicker.launch(arrayOf("application/pdf"))
             "edit" -> editPicker.launch(arrayOf("application/pdf"))
             "compress" -> compressionPicker.launch(arrayOf("application/pdf"))
+            "scan" -> startDocumentScanner()
             else -> scope.launch {
                 snackbar.showSnackbar(if (pt) "Esta ferramenta está em desenvolvimento e ainda não está ativa." else "This tool is in development and is not active yet.")
             }
