@@ -16,9 +16,14 @@ import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
 import com.tom_roush.pdfbox.io.MemoryUsageSetting
 import com.tom_roush.pdfbox.multipdf.PDFMergerUtility
 import com.tom_roush.pdfbox.pdmodel.PDDocument
+import com.tom_roush.pdfbox.pdmodel.PDPage
+import com.tom_roush.pdfbox.pdmodel.common.PDRectangle
+import com.tom_roush.pdfbox.pdmodel.PDPageContentStream
+import com.tom_roush.pdfbox.pdmodel.graphics.image.PDImageXObject
 import com.tom_roush.pdfbox.pdmodel.PDPageContentStream
 import com.tom_roush.pdfbox.pdmodel.font.PDType1Font
 import com.tom_roush.pdfbox.pdmodel.graphics.image.LosslessFactory
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
 import kotlin.math.min
@@ -144,6 +149,70 @@ object PdfOperations {
                 document.save(output)
             }
             require(output.length() > 0L) { "The rotated PDF could not be created." }
+            return output
+        } catch (error: Exception) {
+            output.delete()
+            throw error
+        } finally {
+            input.delete()
+        }
+    }
+
+    /**
+     * Produces a smaller, image-based PDF. This intentionally rasterizes each page:
+     * searchable/selectable text, hyperlinks, forms and vector content will not be preserved.
+     * The source is never modified; the caller must clearly warn the user before running it.
+     */
+    fun compressRasterizedPdf(
+        context: Context,
+        uri: Uri,
+        maxPageDimension: Int,
+        jpegQuality: Int
+    ): File {
+        require(maxPageDimension in 700..2200) { "Choose a page size between 700 and 2200 pixels." }
+        require(jpegQuality in 45..92) { "Choose JPEG quality between 45 and 92." }
+        prepare(context)
+        val input = copyUriToCache(context, uri)
+        val output = File.createTempFile("nexapdf_compressed_", ".pdf", context.cacheDir)
+        try {
+            val descriptor = ParcelFileDescriptor.open(input, ParcelFileDescriptor.MODE_READ_ONLY)
+            descriptor.use { pfd ->
+                PdfRenderer(pfd).use { renderer ->
+                    require(renderer.pageCount > 0) { "This PDF has no pages." }
+                    PDDocument().use { destination ->
+                        for (index in 0 until renderer.pageCount) {
+                            renderer.openPage(index).use { sourcePage ->
+                                val longestSide = maxOf(sourcePage.width, sourcePage.height).coerceAtLeast(1)
+                                val scale = maxPageDimension.toFloat() / longestSide.toFloat()
+                                val pixelWidth = (sourcePage.width * scale).toInt().coerceAtLeast(1)
+                                val pixelHeight = (sourcePage.height * scale).toInt().coerceAtLeast(1)
+                                val bitmap = Bitmap.createBitmap(pixelWidth, pixelHeight, Bitmap.Config.ARGB_8888)
+                                val bytes = ByteArrayOutputStream()
+                                try {
+                                    bitmap.eraseColor(Color.WHITE)
+                                    val transform = android.graphics.Matrix().apply {
+                                        setScale(pixelWidth.toFloat() / sourcePage.width, pixelHeight.toFloat() / sourcePage.height)
+                                    }
+                                    sourcePage.render(bitmap, null, transform, PdfRenderer.Page.RENDER_MODE_FOR_PRINT)
+                                    val encoded = bitmap.compress(Bitmap.CompressFormat.JPEG, jpegQuality, bytes)
+                                    require(encoded && bytes.size() > 0) { "Page " + (index + 1) + " could not be compressed." }
+                                } finally {
+                                    bitmap.recycle()
+                                }
+
+                                val outputPage = PDPage(PDRectangle(sourcePage.width.toFloat(), sourcePage.height.toFloat()))
+                                destination.addPage(outputPage)
+                                val image = PDImageXObject.createFromByteArray(destination, bytes.toByteArray(), "compressed-page-" + (index + 1))
+                                PDPageContentStream(destination, outputPage).use { stream ->
+                                    stream.drawImage(image, 0f, 0f, outputPage.mediaBox.width, outputPage.mediaBox.height)
+                                }
+                            }
+                        }
+                        destination.save(output)
+                    }
+                }
+            }
+            require(output.exists() && output.length() > 0L) { "The compressed PDF could not be created." }
             return output
         } catch (error: Exception) {
             output.delete()
