@@ -9,6 +9,10 @@ import android.graphics.Paint
 import android.graphics.RectF
 import android.graphics.pdf.PdfDocument
 import android.graphics.pdf.PdfRenderer
+import com.google.android.gms.tasks.Tasks
+import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.text.TextRecognition
+import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import android.net.Uri
 import android.os.ParcelFileDescriptor
 import android.provider.OpenableColumns
@@ -21,6 +25,7 @@ import com.tom_roush.pdfbox.pdmodel.common.PDRectangle
 import com.tom_roush.pdfbox.pdmodel.PDPageContentStream
 import com.tom_roush.pdfbox.pdmodel.encryption.AccessPermission
 import com.tom_roush.pdfbox.pdmodel.encryption.StandardProtectionPolicy
+import com.tom_roush.pdfbox.pdmodel.graphics.state.RenderingMode
 import com.tom_roush.pdfbox.rendering.PDFRenderer
 import com.tom_roush.pdfbox.pdmodel.graphics.image.PDImageXObject
 import com.tom_roush.pdfbox.pdmodel.font.PDType1Font
@@ -186,6 +191,85 @@ object PdfOperations {
                 document.save(output)
             }
             require(output.exists() && output.length() > 0L) { "The protected PDF could not be created." }
+            return output
+        } catch (error: Exception) {
+            output.delete()
+            throw error
+        } finally {
+            input.delete()
+        }
+    }
+
+    /**
+     * Adds an invisible text layer to each upright page using bundled, on-device ML Kit OCR.
+     * Original page artwork remains intact. Intended for image/scanned PDFs; already searchable
+     * documents can receive duplicate search text, so the UI warns before processing.
+     */
+    fun createSearchablePdf(context: Context, uri: Uri, password: String? = null): File {
+        prepare(context)
+        val input = copyUriToCache(context, uri)
+        val output = File.createTempFile("nexapdf_searchable_", ".pdf", context.cacheDir)
+        var recognizedLines = 0
+        try {
+            openPdfDocument(input, password).use { document ->
+                require(document.numberOfPages > 0) { "This PDF has no pages." }
+                val renderer = PDFRenderer(document)
+                val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+                try {
+                    for (index in 0 until document.numberOfPages) {
+                        val page = document.getPage(index)
+                        require(page.rotation % 360 == 0) {
+                            "OCR currently needs upright pages. Rotate this PDF to 0° and try again."
+                        }
+                        val crop = page.cropBox
+                        val bitmap = renderer.renderImage(index, 1.5f)
+                        try {
+                            val recognized = Tasks.await(
+                                recognizer.process(InputImage.fromBitmap(bitmap, 0))
+                            )
+                            if (recognized.text.isBlank()) continue
+                            val scaleX = crop.width / bitmap.width.toFloat()
+                            val scaleY = crop.height / bitmap.height.toFloat()
+                            PDPageContentStream(
+                                document,
+                                page,
+                                PDPageContentStream.AppendMode.APPEND,
+                                true,
+                                true
+                            ).use { stream ->
+                                for (block in recognized.textBlocks) {
+                                    for (line in block.lines) {
+                                        val bounds = line.boundingBox ?: continue
+                                        val cleanText = normalizeOcrLine(line.text)
+                                        if (cleanText.isBlank()) continue
+                                        val left = bounds.left.coerceIn(0, bitmap.width)
+                                        val bottom = bounds.bottom.coerceIn(0, bitmap.height)
+                                        val x = crop.lowerLeftX + left * scaleX
+                                        val y = crop.lowerLeftY + crop.height - bottom * scaleY
+                                        val fontSize = (bounds.height() * scaleY * 0.78f).coerceIn(4f, 12f)
+                                        stream.beginText()
+                                        stream.setFont(PDType1Font.HELVETICA, fontSize)
+                                        stream.setRenderingMode(RenderingMode.NEITHER)
+                                        stream.newLineAtOffset(x, y)
+                                        stream.showText(cleanText)
+                                        stream.endText()
+                                        recognizedLines++
+                                    }
+                                }
+                            }
+                        } finally {
+                            bitmap.recycle()
+                        }
+                    }
+                    require(recognizedLines > 0) {
+                        "No text was recognized. Use a clearer scan or a document with upright pages."
+                    }
+                    document.save(output)
+                } finally {
+                    recognizer.close()
+                }
+            }
+            require(output.exists() && output.length() > 0L) { "The searchable PDF could not be created." }
             return output
         } catch (error: Exception) {
             output.delete()
@@ -392,6 +476,35 @@ internal fun normalizePdfAnnotationText(raw: String): String {
         .trim()
     require(normalized.isNotBlank()) { "Enter text to add to the PDF." }
     return normalized.take(180)
+}
+
+
+/** Normalize OCR text for PDFBox's built-in WinAnsi Helvetica font. */
+internal fun normalizeOcrLine(raw: String): String {
+    val normalized = raw
+        .replace('\n', ' ')
+        .replace('\r', ' ')
+        .replace('\t', ' ')
+        .replace('\u2018', '\'')
+        .replace('\u2019', '\'')
+        .replace('\u201C', '"')
+        .replace('\u201D', '"')
+        .replace('\u2013', '-')
+        .replace('\u2014', '-')
+        .replace('\u2022', '-')
+        .trim()
+    val output = StringBuilder()
+    var offset = 0
+    while (offset < normalized.length) {
+        val codePoint = normalized.codePointAt(offset)
+        if ((codePoint in 32..126) || (codePoint in 160..255)) {
+            output.append(codePoint.toChar())
+        } else {
+            output.append('?')
+        }
+        offset += Character.charCount(codePoint)
+    }
+    return output.toString().take(400)
 }
 
 

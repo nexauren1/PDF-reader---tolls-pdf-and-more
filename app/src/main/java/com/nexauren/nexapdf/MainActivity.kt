@@ -89,7 +89,7 @@ private val tools = listOf(
     PdfTool("edit", "Editar e assinar", "Annotate & sign", "Adiciona texto ou assinatura", "Add text or a drawn signature", Pink, Icons.Filled.Edit, true),
     PdfTool("scan", "Digitalizar", "Scan document", "Captura e corrige documentos", "Capture and crop documents", Cyan, Icons.Filled.CameraAlt, true),
     PdfTool("protect", "Proteger PDF", "Protect PDF", "Proteção por palavra-passe", "Password protection", Violet, Icons.Filled.Lock, true),
-    PdfTool("ocr", "OCR", "OCR", "Torna digitalizações pesquisáveis", "Make scans searchable", Blue, Icons.Filled.Search),
+    PdfTool("ocr", "OCR offline", "Offline OCR", "Torna digitalizações pesquisáveis", "Make scans searchable", Blue, Icons.Filled.Search, true),
     PdfTool("translate", "Traduzir PDF", "Translate PDF", "Tradução online opcional", "Optional online translation", Pink, Icons.Filled.Translate)
 )
 
@@ -126,6 +126,8 @@ private fun NexaPdfApp() {
     var showCompressionDialog by remember { mutableStateOf(false) }
     var protectUri by remember { mutableStateOf<Uri?>(null) }
     var showProtectionDialog by remember { mutableStateOf(false) }
+    var ocrUri by remember { mutableStateOf<Uri?>(null) }
+    var showOcrDialog by remember { mutableStateOf(false) }
     var passwordUri by remember { mutableStateOf<Uri?>(null) }
     var passwordName by remember { mutableStateOf("") }
     var passwordWasWrong by remember { mutableStateOf(false) }
@@ -250,6 +252,9 @@ private fun NexaPdfApp() {
     val protectionPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) { protectUri = uri; showProtectionDialog = true }
     }
+    val ocrPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) { ocrUri = uri; showOcrDialog = true }
+    }
 
     mergeCallback = { uris ->
         if (uris.size >= 2) runOperation(if (pt) "A juntar PDFs…" else "Merging PDFs…") { PdfOperations.merge(context, uris) }
@@ -339,6 +344,7 @@ private fun NexaPdfApp() {
             "edit" -> editPicker.launch(arrayOf("application/pdf"))
             "compress" -> compressionPicker.launch(arrayOf("application/pdf"))
             "protect" -> protectionPicker.launch(arrayOf("application/pdf"))
+            "ocr" -> ocrPicker.launch(arrayOf("application/pdf"))
             "scan" -> startDocumentScanner()
             else -> scope.launch {
                 snackbar.showSnackbar(if (pt) "Esta ferramenta está em desenvolvimento e ainda não está ativa." else "This tool is in development and is not active yet.")
@@ -469,6 +475,21 @@ private fun NexaPdfApp() {
         )
     }
 
+    if (showOcrDialog && ocrUri != null) {
+        PdfOcrDialog(
+            pt = pt,
+            fileName = PdfOperations.displayName(context, ocrUri!!),
+            onDismiss = { showOcrDialog = false; ocrUri = null },
+            onRunOcr = { sourcePassword ->
+                val uri = ocrUri
+                showOcrDialog = false
+                if (uri != null) runOperation(if (pt) "A reconhecer texto localmente…" else "Recognizing text on-device…") {
+                    PdfOperations.createSearchablePdf(context, uri, sourcePassword)
+                }
+            }
+        )
+    }
+
     if (showPasswordDialog && passwordUri != null) {
         PdfPasswordDialog(
             pt = pt,
@@ -511,6 +532,54 @@ private fun NexaPdfApp() {
         onDismissRequest = {}, containerColor = Panel, confirmButton = {},
         title = { Text(busyText, color = Color.White) },
         text = { Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) { CircularProgressIndicator(color = Cyan, modifier = Modifier.size(26.dp)); Text(if (pt) "A processar no dispositivo…" else "Processing on this device…", color = SecondaryText) } }
+    )
+}
+
+@Composable
+private fun PdfOcrDialog(
+    pt: Boolean,
+    fileName: String,
+    onDismiss: () -> Unit,
+    onRunOcr: (String?) -> Unit
+) {
+    var password by remember(fileName) { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Panel,
+        title = {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(if (pt) "OCR offline" else "Offline OCR", color = Color.White, fontWeight = FontWeight.Bold)
+                Text(fileName, color = SecondaryText, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    if (pt) "Esta ferramenta usa reconhecimento de texto no dispositivo e adiciona uma camada de texto pesquisável. É indicada para digitalizações. PDFs que já têm texto podem ganhar texto duplicado. O original fica intacto." else "This tool recognizes text on your device and adds a searchable text layer. It is intended for scans. PDFs that already contain text may get duplicate text. The original stays unchanged.",
+                    color = SecondaryText, fontSize = 12.sp, lineHeight = 17.sp
+                )
+                Text(
+                    if (pt) "O PDF e o texto reconhecido não são enviados para um servidor." else "The PDF and recognized text are not uploaded to a server.",
+                    color = Cyan, fontSize = 11.sp, fontWeight = FontWeight.SemiBold
+                )
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = { password = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    label = { Text(if (pt) "Palavra-passe (se necessária)" else "Password (if needed)") },
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Violet, unfocusedBorderColor = PanelAlt, focusedTextColor = Color.White, unfocusedTextColor = Color.White)
+                )
+            }
+        },
+        confirmButton = {
+            Button(onClick = { onRunOcr(password.takeIf { it.isNotEmpty() }) }, colors = ButtonDefaults.buttonColors(containerColor = Violet)) {
+                Text(if (pt) "Criar PDF pesquisável" else "Create searchable PDF")
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(if (pt) "Cancelar" else "Cancel") } }
     )
 }
 
