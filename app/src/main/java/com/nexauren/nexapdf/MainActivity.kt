@@ -508,18 +508,18 @@ private fun NexaPdfApp() {
             pt = pt,
             fileName = PdfOperations.displayName(context, editUri!!),
             onDismiss = { showEditDialog = false },
-            onApplyText = { pageNumber, text ->
+            onApplyText = { pageNumber, text, password ->
                 val uri = editUri
                 showEditDialog = false
                 if (uri != null) runOperation(if (pt) "A adicionar texto…" else "Adding text…") {
-                    PdfOperations.addTextAnnotation(context, uri, pageNumber, text)
+                    PdfOperations.addTextAnnotation(context, uri, pageNumber, text, password)
                 }
             },
-            onApplySignature = { pageNumber, bitmap ->
+            onApplySignature = { pageNumber, bitmap, password ->
                 val uri = editUri
                 showEditDialog = false
                 if (uri != null) runOperation(if (pt) "A inserir assinatura…" else "Adding signature…") {
-                    PdfOperations.addSignature(context, uri, pageNumber, bitmap)
+                    PdfOperations.addSignature(context, uri, pageNumber, bitmap, password)
                 }
             }
         )
@@ -1082,11 +1082,12 @@ private fun PdfEditDialog(
     pt: Boolean,
     fileName: String,
     onDismiss: () -> Unit,
-    onApplyText: (Int, String) -> Unit,
-    onApplySignature: (Int, Bitmap) -> Unit
+    onApplyText: (Int, String, String?) -> Unit,
+    onApplySignature: (Int, Bitmap, String?) -> Unit
 ) {
     var mode by remember { mutableStateOf("text") }
     var noteText by remember { mutableStateOf("") }
+    var password by remember(fileName) { mutableStateOf("") }
     var pageText by remember { mutableStateOf("1") }
     val strokes = remember { mutableStateListOf<MutableList<Offset>>() }
     var canvasSize by remember { mutableStateOf(IntSize.Zero) }
@@ -1183,6 +1184,16 @@ private fun PdfEditDialog(
                         }
                     }
                 }
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = { password = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    label = { Text(if (pt) "Palavra-passe (se necessária)" else "Password (if needed)") },
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Violet, unfocusedBorderColor = PanelAlt, focusedTextColor = Color.White, unfocusedTextColor = Color.White)
+                )
             }
         },
         confirmButton = {
@@ -1190,8 +1201,9 @@ private fun PdfEditDialog(
                 enabled = pageNumber != null && pageNumber > 0 && if (mode == "text") noteText.isNotBlank() else hasSignature && canvasSize.width > 0 && canvasSize.height > 0,
                 onClick = {
                     val page = pageNumber ?: return@Button
-                    if (mode == "text") onApplyText(page, noteText)
-                    else onApplySignature(page, createSignatureBitmap(strokes, canvasSize))
+                    val sourcePassword = password.takeIf { it.isNotBlank() }
+                    if (mode == "text") onApplyText(page, noteText, sourcePassword)
+                    else onApplySignature(page, createSignatureBitmap(strokes, canvasSize), sourcePassword)
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = Violet)
             ) { Text(if (pt) "Aplicar e guardar" else "Apply and save") }
