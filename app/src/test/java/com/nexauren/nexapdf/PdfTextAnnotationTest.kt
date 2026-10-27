@@ -13,6 +13,10 @@ class PdfTextAnnotationTest {
         assertEquals("'Olá' - \"PDF\"", normalizePdfAnnotationText("‘Olá’ — “PDF”"))
     }
 
+    @Test fun replacesUnsupportedUnicodeWithoutThrowing() {
+        assertEquals("A?B", normalizePdfAnnotationText("A🙂B"))
+    }
+
     @Test fun rejectsBlankText() {
         assertThrows(IllegalArgumentException::class.java) { normalizePdfAnnotationText(" \n\t ") }
     }
