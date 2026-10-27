@@ -72,7 +72,10 @@ object PdfOperations {
                         val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
                         val canvas = android.graphics.Canvas(bitmap)
                         canvas.drawColor(Color.WHITE)
-                        page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                        val transform = android.graphics.Matrix().apply {
+                            setScale(width.toFloat() / page.width, height.toFloat() / page.height)
+                        }
+                        page.render(bitmap, null, transform, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
                         bitmap
                     }
                 }
