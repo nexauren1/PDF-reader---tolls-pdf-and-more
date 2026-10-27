@@ -52,6 +52,6 @@ The workflow in `.github/workflows/android.yml` installs the build environment a
 
 ## Important limitations
 
-This is an initial development milestone. It has **not yet been verified as a successful APK build or tested on physical devices**, and it is **not a Play Store release**. Some tools listed in the UI are deliberately marked in development. Do not use it as a substitute for a professionally validated secure document workflow until testing is complete.
+This is an initial development milestone. The Android debug APK and page-range unit tests **passed GitHub Actions CI on 27 October 2026** ([build run](https://github.com/nexauren1/PDF-reader---tolls-pdf-and-more/actions/runs/40489850244)). It has **not yet been installed and validated on physical devices**, and it is **not a Play Store release**. Some tools listed in the UI are deliberately marked in development. Do not use it as a substitute for a professionally validated secure document workflow until device and security testing is complete.
 
 For PDF libraries and licensing notes, see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
