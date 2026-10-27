@@ -160,17 +160,19 @@ object PdfOperations {
         }
     }
 
-    fun split(context: Context, uri: Uri, firstPage: Int, lastPage: Int): File {
+    fun split(context: Context, uri: Uri, firstPage: Int, lastPage: Int, password: String? = null): File {
         prepare(context)
         val input = copyUriToCache(context, uri)
         val output = File.createTempFile("nexapdf_pages_", ".pdf", context.cacheDir)
         try {
-            PDDocument.load(input).use { source ->
+            openPdfDocument(input, password).use { source ->
                 val range = PageRange.of(firstPage, lastPage, source.numberOfPages)
+                val wasEncrypted = source.isEncrypted
                 PDDocument().use { destination ->
                     for (index in (range.firstPage - 1) until range.lastPage) {
                         destination.importPage(source.getPage(index))
                     }
+                    if (wasEncrypted && !password.isNullOrBlank()) protectDocumentCopy(destination, password)
                     destination.save(output)
                 }
             }
