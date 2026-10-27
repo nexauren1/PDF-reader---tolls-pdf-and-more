@@ -121,6 +121,7 @@ private fun NexaPdfApp() {
     var showSplit by remember { mutableStateOf(false) }
     var rotateUri by remember { mutableStateOf<Uri?>(null) }
     var showRotate by remember { mutableStateOf(false) }
+    var rotatePassword by remember { mutableStateOf("") }
     var organizeUri by remember { mutableStateOf<Uri?>(null) }
     var showOrganizerDialog by remember { mutableStateOf(false) }
     var editUri by remember { mutableStateOf<Uri?>(null) }
@@ -295,7 +296,7 @@ private fun NexaPdfApp() {
             } catch (e: Exception) { snackbar.showSnackbar(e.message ?: "Could not read PDF.") }
         }
     }
-    rotateCallback = { uri -> if (uri != null) { rotateUri = uri; showRotate = true } }
+    rotateCallback = { uri -> if (uri != null) { rotateUri = uri; rotatePassword = ""; showRotate = true } }
     editCallback = { uri -> if (uri != null) { editUri = uri; showEditDialog = true } }
 
     val scanResultLauncher = rememberLauncherForActivityResult(
@@ -474,12 +475,29 @@ private fun NexaPdfApp() {
     if (showRotate) AlertDialog(
         onDismissRequest = { showRotate = false }, containerColor = Panel,
         title = { Text(if (pt) "Rodar páginas" else "Rotate pages", color = Color.White, fontWeight = FontWeight.Bold) },
-        text = { Text(if (pt) "Todas as páginas serão rodadas 90°. O original será mantido." else "All pages will be rotated 90°. The original file will be kept.", color = SecondaryText) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(if (pt) "Todas as páginas serão rodadas 90°. O original será mantido." else "All pages will be rotated 90°. The original file will be kept.", color = SecondaryText)
+                OutlinedTextField(
+                    value = rotatePassword,
+                    onValueChange = { rotatePassword = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    label = { Text(if (pt) "Palavra-passe (se necessária)" else "Password (if needed)") },
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Violet, unfocusedBorderColor = PanelAlt, focusedTextColor = Color.White, unfocusedTextColor = Color.White)
+                )
+            }
+        },
         confirmButton = {
             Button(onClick = {
                 val uri = rotateUri
+                val password = rotatePassword.takeIf { it.isNotBlank() }
                 showRotate = false
-                if (uri != null) runOperation(if (pt) "A rodar páginas…" else "Rotating pages…") { PdfOperations.rotateAllPages(context, uri) }
+                if (uri != null) runOperation(if (pt) "A rodar páginas…" else "Rotating pages…") {
+                    PdfOperations.rotateAllPages(context, uri, password)
+                }
             }, colors = ButtonDefaults.buttonColors(containerColor = Violet)) { Text(if (pt) "Rodar e guardar" else "Rotate and save") }
         },
         dismissButton = { TextButton(onClick = { showRotate = false }) { Text(if (pt) "Cancelar" else "Cancel") } }
