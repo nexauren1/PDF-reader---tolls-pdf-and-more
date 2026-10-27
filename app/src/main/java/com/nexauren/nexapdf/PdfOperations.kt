@@ -24,6 +24,11 @@ import kotlin.math.min
 object PdfOperations {
     fun prepare(context: Context) {
         PDFBoxResourceLoader.init(context.applicationContext)
+        // Remove abandoned temporary files from earlier sessions; never touch user-picked documents.
+        val cutoff = System.currentTimeMillis() - 24L * 60L * 60L * 1000L
+        context.cacheDir.listFiles()
+            ?.filter { it.name.startsWith("nexapdf_") && it.lastModified() < cutoff }
+            ?.forEach { it.delete() }
     }
 
     fun displayName(context: Context, uri: Uri): String {
@@ -45,27 +50,35 @@ object PdfOperations {
 
     fun pageCount(context: Context, uri: Uri): Int {
         val file = copyUriToCache(context, uri)
-        val descriptor = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
-        return descriptor.use { pfd -> PdfRenderer(pfd).use { renderer -> renderer.pageCount } }
+        return try {
+            val descriptor = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
+            descriptor.use { pfd -> PdfRenderer(pfd).use { renderer -> renderer.pageCount } }
+        } finally {
+            file.delete()
+        }
     }
 
     fun renderPage(context: Context, uri: Uri, pageIndex: Int, maxWidth: Int = 1200): Bitmap {
         val file = copyUriToCache(context, uri)
-        val descriptor = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
-        descriptor.use { pfd ->
-            PdfRenderer(pfd).use { renderer ->
-                require(renderer.pageCount > 0) { "This PDF has no pages." }
-                val safeIndex = pageIndex.coerceIn(0, renderer.pageCount - 1)
-                renderer.openPage(safeIndex).use { page ->
-                    val width = min(page.width, maxWidth).coerceAtLeast(1)
-                    val height = (width.toFloat() * page.height / page.width).toInt().coerceAtLeast(1)
-                    val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-                    val canvas = android.graphics.Canvas(bitmap)
-                    canvas.drawColor(Color.WHITE)
-                    page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-                    return bitmap
+        return try {
+            val descriptor = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
+            descriptor.use { pfd ->
+                PdfRenderer(pfd).use { renderer ->
+                    require(renderer.pageCount > 0) { "This PDF has no pages." }
+                    val safeIndex = pageIndex.coerceIn(0, renderer.pageCount - 1)
+                    renderer.openPage(safeIndex).use { page ->
+                        val width = min(page.width, maxWidth).coerceAtLeast(1)
+                        val height = (width.toFloat() * page.height / page.width).toInt().coerceAtLeast(1)
+                        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+                        val canvas = android.graphics.Canvas(bitmap)
+                        canvas.drawColor(Color.WHITE)
+                        page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                        bitmap
+                    }
                 }
             }
+        } finally {
+            file.delete()
         }
     }
 
@@ -73,44 +86,65 @@ object PdfOperations {
         require(uris.size >= 2) { "Select at least two PDF files to merge." }
         prepare(context)
         val output = File.createTempFile("nexapdf_merged_", ".pdf", context.cacheDir)
-        val utility = PDFMergerUtility()
-        val inputs = uris.map { copyUriToCache(context, it) }
-        inputs.forEach { utility.addSource(it) }
-        utility.destinationFileName = output.absolutePath
-        utility.mergeDocuments(MemoryUsageSetting.setupMainMemoryOnly())
-        require(output.exists() && output.length() > 0L) { "The merged PDF could not be created." }
-        return output
+        val inputs = mutableListOf<File>()
+        try {
+            uris.forEach { inputs += copyUriToCache(context, it) }
+            val utility = PDFMergerUtility()
+            inputs.forEach { utility.addSource(it) }
+            utility.destinationFileName = output.absolutePath
+            utility.mergeDocuments(MemoryUsageSetting.setupTempFileOnly())
+            require(output.exists() && output.length() > 0L) { "The merged PDF could not be created." }
+            return output
+        } catch (error: Exception) {
+            output.delete()
+            throw error
+        } finally {
+            inputs.forEach { it.delete() }
+        }
     }
 
     fun split(context: Context, uri: Uri, firstPage: Int, lastPage: Int): File {
         prepare(context)
         val input = copyUriToCache(context, uri)
         val output = File.createTempFile("nexapdf_pages_", ".pdf", context.cacheDir)
-        PDDocument.load(input).use { source ->
-            val count = source.numberOfPages
-            val range = PageRange.of(firstPage, lastPage, count)
-            PDDocument().use { destination ->
-                for (index in (range.firstPage - 1) until range.lastPage) {
-                    destination.importPage(source.getPage(index))
+        try {
+            PDDocument.load(input).use { source ->
+                val range = PageRange.of(firstPage, lastPage, source.numberOfPages)
+                PDDocument().use { destination ->
+                    for (index in (range.firstPage - 1) until range.lastPage) {
+                        destination.importPage(source.getPage(index))
+                    }
+                    destination.save(output)
                 }
-                destination.save(output)
             }
+            require(output.length() > 0L) { "The selected pages could not be exported." }
+            return output
+        } catch (error: Exception) {
+            output.delete()
+            throw error
+        } finally {
+            input.delete()
         }
-        require(output.length() > 0L) { "The selected pages could not be exported." }
-        return output
     }
 
     fun rotateAllPages(context: Context, uri: Uri): File {
         prepare(context)
         val input = copyUriToCache(context, uri)
         val output = File.createTempFile("nexapdf_rotated_", ".pdf", context.cacheDir)
-        PDDocument.load(input).use { document ->
-            require(document.numberOfPages > 0) { "This PDF has no pages." }
-            for (page in document.pages) page.rotation = (page.rotation + 90) % 360
-            document.save(output)
+        try {
+            PDDocument.load(input).use { document ->
+                require(document.numberOfPages > 0) { "This PDF has no pages." }
+                for (page in document.pages) page.rotation = (page.rotation + 90) % 360
+                document.save(output)
+            }
+            require(output.length() > 0L) { "The rotated PDF could not be created." }
+            return output
+        } catch (error: Exception) {
+            output.delete()
+            throw error
+        } finally {
+            input.delete()
         }
-        require(output.length() > 0L) { "The rotated PDF could not be created." }
-        return output
     }
 
     /** Converts selected images to a real PDF using Android's built-in PdfDocument API. */
