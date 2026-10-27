@@ -281,14 +281,16 @@ object PdfOperations {
         }
     }
 
-    fun rotateAllPages(context: Context, uri: Uri): File {
+    fun rotateAllPages(context: Context, uri: Uri, password: String? = null): File {
         prepare(context)
         val input = copyUriToCache(context, uri)
         val output = File.createTempFile("nexapdf_rotated_", ".pdf", context.cacheDir)
         try {
-            PDDocument.load(input).use { document ->
+            openPdfDocument(input, password).use { document ->
                 require(document.numberOfPages > 0) { "This PDF has no pages." }
+                val wasEncrypted = document.isEncrypted
                 for (page in document.pages) page.rotation = (page.rotation + 90) % 360
+                if (wasEncrypted && !password.isNullOrBlank()) protectDocumentCopy(document, password)
                 document.save(output)
             }
             require(output.length() > 0L) { "The rotated PDF could not be created." }
