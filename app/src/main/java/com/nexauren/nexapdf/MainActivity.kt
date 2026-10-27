@@ -81,6 +81,7 @@ private data class PdfTool(
 )
 
 private val tools = listOf(
+    PdfTool("organize", "Organizar páginas", "Organize pages", "Remove ou reordena páginas", "Remove or reorder pages", Violet, Icons.Filled.Dashboard, true),
     PdfTool("merge", "Juntar PDF", "Merge PDF", "Combina vários ficheiros num só", "Combine several files into one", Violet, Icons.Filled.Description, true),
     PdfTool("split", "Dividir PDF", "Split PDF", "Extrai páginas por intervalo", "Extract pages by range", Blue, Icons.Filled.ContentCut, true),
     PdfTool("image", "Imagem para PDF", "Image to PDF", "Cria um PDF a partir de imagens", "Create a PDF from images", Cyan, Icons.Filled.Image, true),
@@ -120,6 +121,8 @@ private fun NexaPdfApp() {
     var showSplit by remember { mutableStateOf(false) }
     var rotateUri by remember { mutableStateOf<Uri?>(null) }
     var showRotate by remember { mutableStateOf(false) }
+    var organizeUri by remember { mutableStateOf<Uri?>(null) }
+    var showOrganizerDialog by remember { mutableStateOf(false) }
     var editUri by remember { mutableStateOf<Uri?>(null) }
     var showEditDialog by remember { mutableStateOf(false) }
     var compressionUri by remember { mutableStateOf<Uri?>(null) }
@@ -248,6 +251,9 @@ private fun NexaPdfApp() {
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { imageCallback(it) }
     val splitPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { splitCallback(it) }
     val rotatePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { rotateCallback(it) }
+    val organizerPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) { organizeUri = uri; showOrganizerDialog = true }
+    }
     var editCallback by remember { mutableStateOf<(Uri?) -> Unit>({}) }
     val editPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { editCallback(it) }
     val compressionPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -366,6 +372,7 @@ private fun NexaPdfApp() {
             "image" -> imagePicker.launch(arrayOf("image/*"))
             "split" -> splitPicker.launch(arrayOf("application/pdf"))
             "rotate" -> rotatePicker.launch(arrayOf("application/pdf"))
+            "organize" -> organizerPicker.launch(arrayOf("application/pdf"))
             "edit" -> editPicker.launch(arrayOf("application/pdf"))
             "compress" -> compressionPicker.launch(arrayOf("application/pdf"))
             "protect" -> protectionPicker.launch(arrayOf("application/pdf"))
@@ -505,6 +512,28 @@ private fun NexaPdfApp() {
         )
     }
 
+    if (showOrganizerDialog && organizeUri != null) {
+        PdfOrganizerDialog(
+            pt = pt,
+            fileName = PdfOperations.displayName(context, organizeUri!!),
+            onDismiss = { showOrganizerDialog = false; organizeUri = null },
+            onRemove = { firstPage, lastPage, password ->
+                val uri = organizeUri
+                showOrganizerDialog = false
+                if (uri != null) runOperation(if (pt) "A remover páginas…" else "Removing pages…") {
+                    PdfOperations.removePageRange(context, uri, firstPage, lastPage, password)
+                }
+            },
+            onReorder = { orderText, password ->
+                val uri = organizeUri
+                showOrganizerDialog = false
+                if (uri != null) runOperation(if (pt) "A reordenar páginas…" else "Reordering pages…") {
+                    PdfOperations.reorderPages(context, uri, orderText, password)
+                }
+            }
+        )
+    }
+
     if (showReaderSearch && activeUri != null) {
         PdfSearchDialog(
             pt = pt,
@@ -578,6 +607,115 @@ private fun NexaPdfApp() {
         onDismissRequest = {}, containerColor = Panel, confirmButton = {},
         title = { Text(busyText, color = Color.White) },
         text = { Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) { CircularProgressIndicator(color = Cyan, modifier = Modifier.size(26.dp)); Text(if (pt) "A processar no dispositivo…" else "Processing on this device…", color = SecondaryText) } }
+    )
+}
+
+@Composable
+private fun PdfOrganizerDialog(
+    pt: Boolean,
+    fileName: String,
+    onDismiss: () -> Unit,
+    onRemove: (Int, Int, String?) -> Unit,
+    onReorder: (String, String?) -> Unit
+) {
+    var mode by remember(fileName) { mutableStateOf("remove") }
+    var firstPage by remember(fileName) { mutableStateOf("1") }
+    var lastPage by remember(fileName) { mutableStateOf("1") }
+    var pageOrder by remember(fileName) { mutableStateOf("") }
+    var password by remember(fileName) { mutableStateOf("") }
+    val first = firstPage.toIntOrNull()
+    val last = lastPage.toIntOrNull()
+    val canRemove = first != null && last != null && first > 0 && last >= first
+    val canReorder = pageOrder.isNotBlank() && pageOrder.split(',').all { it.trim().toIntOrNull() != null }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Panel,
+        title = {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(if (pt) "Organizar páginas" else "Organize pages", color = Color.White, fontWeight = FontWeight.Bold)
+                Text(fileName, color = SecondaryText, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        },
+        text = {
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(
+                        selected = mode == "remove",
+                        onClick = { mode = "remove" },
+                        label = { Text(if (pt) "Remover" else "Remove") },
+                        leadingIcon = { Icon(Icons.Filled.Delete, null) }
+                    )
+                    FilterChip(
+                        selected = mode == "reorder",
+                        onClick = { mode = "reorder" },
+                        label = { Text(if (pt) "Reordenar" else "Reorder") },
+                        leadingIcon = { Icon(Icons.Filled.SwapVert, null) }
+                    )
+                }
+                if (mode == "remove") {
+                    Text(
+                        if (pt) "Indica o intervalo de páginas a remover. Não é permitido remover todas as páginas." else "Enter the page range to remove. You cannot remove every page.",
+                        color = SecondaryText, fontSize = 12.sp, lineHeight = 16.sp
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(
+                            value = firstPage,
+                            onValueChange = { firstPage = it.filter(Char::isDigit).take(5) },
+                            modifier = Modifier.weight(1f),
+                            singleLine = true,
+                            label = { Text(if (pt) "Da página" else "From page") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                        )
+                        OutlinedTextField(
+                            value = lastPage,
+                            onValueChange = { lastPage = it.filter(Char::isDigit).take(5) },
+                            modifier = Modifier.weight(1f),
+                            singleLine = true,
+                            label = { Text(if (pt) "Até à página" else "To page") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                        )
+                    }
+                } else {
+                    OutlinedTextField(
+                        value = pageOrder,
+                        onValueChange = { pageOrder = it.filter { ch -> ch.isDigit() || ch == ',' || ch.isWhitespace() }.take(400) },
+                        modifier = Modifier.fillMaxWidth(),
+                        minLines = 2,
+                        maxLines = 3,
+                        label = { Text(if (pt) "Nova ordem das páginas" else "New page order") },
+                        placeholder = { Text("3, 1, 2") },
+                        supportingText = { Text(if (pt) "Escreve todos os números uma vez, separados por vírgulas." else "Enter every page number once, separated by commas.") }
+                    )
+                }
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = { password = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    label = { Text(if (pt) "Palavra-passe (se necessária)" else "Password (if needed)") },
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Violet, unfocusedBorderColor = PanelAlt, focusedTextColor = Color.White, unfocusedTextColor = Color.White)
+                )
+                Text(
+                    if (pt) "Será criada uma cópia. O original fica intacto e os PDFs protegidos continuam protegidos quando a palavra-passe é fornecida." else "A new copy will be created. The original stays intact, and password-protected PDFs remain protected when a password is provided.",
+                    color = Cyan, fontSize = 11.sp, lineHeight = 15.sp
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                enabled = if (mode == "remove") canRemove else canReorder,
+                onClick = {
+                    val pass = password.takeIf { it.isNotBlank() }
+                    if (mode == "remove") onRemove(first!!, last!!, pass)
+                    else onReorder(pageOrder, pass)
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = Violet)
+            ) { Text(if (pt) "Aplicar e guardar" else "Apply and save") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(if (pt) "Cancelar" else "Cancel") } }
     )
 }
 

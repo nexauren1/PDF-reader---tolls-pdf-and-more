@@ -81,13 +81,22 @@ object PdfOperations {
                 require(document.numberOfPages > 0) { "This PDF has no pages." }
                 val safeIndex = pageIndex.coerceIn(0, document.numberOfPages - 1)
                 val cropBox = document.getPage(safeIndex).cropBox
+                require(maxWidth > 0) { "Preview width must be positive." }
                 val longestSide = maxOf(cropBox.width, cropBox.height).coerceAtLeast(1f)
-                val scale = min(maxWidth.toFloat() / longestSide, 2f).coerceAtLeast(0.5f)
+                // Cap the longest bitmap dimension instead of forcing a large minimum scale.
+                val scale = min(maxWidth.toFloat() / longestSide, 2f).coerceAtLeast(0.001f)
                 PDFRenderer(document).renderImage(safeIndex, scale)
             }
         } finally {
             file.delete()
         }
+    }
+
+    private fun protectDocumentCopy(document: PDDocument, password: String) {
+        val ownerPassword = UUID.randomUUID().toString() + UUID.randomUUID().toString()
+        val policy = StandardProtectionPolicy(ownerPassword, password, AccessPermission())
+        policy.setEncryptionKeyLength(128)
+        document.protect(policy)
     }
 
     private fun openPdfDocument(file: File, password: String?): PDDocument {
@@ -175,6 +184,103 @@ object PdfOperations {
         }
     }
 
+    fun removePageRange(
+        context: Context,
+        uri: Uri,
+        firstPage: Int,
+        lastPage: Int,
+        password: String? = null
+    ): File {
+        prepare(context)
+        val input = copyUriToCache(context, uri)
+        val output = File.createTempFile("nexapdf_removed_", ".pdf", context.cacheDir)
+        try {
+            openPdfDocument(input, password).use { source ->
+                val range = PageRange.of(firstPage, lastPage, source.numberOfPages)
+                require(range.pageCount < source.numberOfPages) {
+                    "You cannot remove every page from a PDF."
+                }
+                PDDocument().use { destination ->
+                    for (index in 0 until source.numberOfPages) {
+                        val pageNumber = index + 1
+                        if (pageNumber !in range.firstPage..range.lastPage) {
+                            destination.importPage(source.getPage(index))
+                        }
+                    }
+                    if (source.isEncrypted && !password.isNullOrBlank()) protectDocumentCopy(destination, password)
+                    destination.save(output)
+                }
+            }
+            require(output.exists() && output.length() > 0L) { "The edited PDF could not be created." }
+            return output
+        } catch (error: Exception) {
+            output.delete()
+            throw error
+        } finally {
+            input.delete()
+        }
+    }
+
+    fun reorderPages(
+        context: Context,
+        uri: Uri,
+        pageOrder: List<Int>,
+        password: String? = null
+    ): File {
+        prepare(context)
+        val input = copyUriToCache(context, uri)
+        val output = File.createTempFile("nexapdf_reordered_", ".pdf", context.cacheDir)
+        try {
+            openPdfDocument(input, password).use { source ->
+                val order = validatePageOrder(pageOrder, source.numberOfPages)
+                PDDocument().use { destination ->
+                    order.forEach { pageNumber ->
+                        destination.importPage(source.getPage(pageNumber - 1))
+                    }
+                    if (source.isEncrypted && !password.isNullOrBlank()) protectDocumentCopy(destination, password)
+                    destination.save(output)
+                }
+            }
+            require(output.exists() && output.length() > 0L) { "The reordered PDF could not be created." }
+            return output
+        } catch (error: Exception) {
+            output.delete()
+            throw error
+        } finally {
+            input.delete()
+        }
+    }
+
+    fun reorderPages(
+        context: Context,
+        uri: Uri,
+        pageOrderText: String,
+        password: String? = null
+    ): File {
+        prepare(context)
+        val input = copyUriToCache(context, uri)
+        val output = File.createTempFile("nexapdf_reordered_", ".pdf", context.cacheDir)
+        try {
+            openPdfDocument(input, password).use { source ->
+                val order = parsePageOrder(pageOrderText, source.numberOfPages)
+                PDDocument().use { destination ->
+                    order.forEach { pageNumber ->
+                        destination.importPage(source.getPage(pageNumber - 1))
+                    }
+                    if (source.isEncrypted && !password.isNullOrBlank()) protectDocumentCopy(destination, password)
+                    destination.save(output)
+                }
+            }
+            require(output.exists() && output.length() > 0L) { "The reordered PDF could not be created." }
+            return output
+        } catch (error: Exception) {
+            output.delete()
+            throw error
+        } finally {
+            input.delete()
+        }
+    }
+
     fun rotateAllPages(context: Context, uri: Uri): File {
         prepare(context)
         val input = copyUriToCache(context, uri)
@@ -250,7 +356,9 @@ object PdfOperations {
                             "OCR currently needs upright pages. Rotate this PDF to 0° and try again."
                         }
                         val crop = page.cropBox
-                        val bitmap = renderer.renderImage(index, 1.5f)
+                        val longestSide = maxOf(crop.width, crop.height).coerceAtLeast(1f)
+                        val renderScale = min(1.5f, 1800f / longestSide).coerceAtLeast(0.001f)
+                        val bitmap = renderer.renderImage(index, renderScale)
                         try {
                             val recognized = Tasks.await(
                                 recognizer.process(InputImage.fromBitmap(bitmap, 0))
@@ -457,9 +565,7 @@ object PdfOperations {
         val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
         try {
             uris.forEachIndexed { index, uri ->
-                val bitmap = context.contentResolver.openInputStream(uri)?.use { stream ->
-                    BitmapFactory.decodeStream(stream)
-                } ?: throw IllegalArgumentException("An image could not be read.")
+                val bitmap = decodeSampledBitmap(context, uri, maxDimension = 2200)
                 try {
                     val pageInfo = PdfDocument.PageInfo.Builder(pageWidth, pageHeight, index + 1).create()
                     val page = pdf.startPage(pageInfo)
@@ -479,6 +585,9 @@ object PdfOperations {
                 }
             }
             FileOutputStream(output).use { pdf.writeTo(it) }
+        } catch (error: Exception) {
+            output.delete()
+            throw error
         } finally {
             pdf.close()
         }
@@ -507,6 +616,30 @@ internal fun normalizePdfAnnotationText(raw: String): String {
 }
 
 
+internal fun parsePageOrder(input: String, pageCount: Int): List<Int> {
+    require(pageCount > 0) { "The PDF has no pages." }
+    val values = input.split(',').map { token ->
+        token.trim().toIntOrNull()
+            ?: throw IllegalArgumentException("Use a comma-separated list of page numbers.")
+    }
+    return validatePageOrder(values, pageCount)
+}
+
+internal fun validatePageOrder(values: List<Int>, pageCount: Int): List<Int> {
+    require(pageCount > 0) { "The PDF has no pages." }
+    require(values.size == pageCount) {
+        "Enter every page number exactly once (1 to " + pageCount + ")."
+    }
+    require(values.all { it in 1..pageCount }) {
+        "Page numbers must be between 1 and " + pageCount + "."
+    }
+    require(values.toSet().size == pageCount) {
+        "Each page number must appear exactly once."
+    }
+    return values.toList()
+}
+
+
 data class PdfSearchHit(val pageNumber: Int, val snippet: String)
 
 internal fun findPdfSearchSnippet(pageText: String, query: String): String? {
@@ -520,6 +653,30 @@ internal fun findPdfSearchSnippet(pageText: String, query: String): String? {
     val prefix = if (start > 0) "…" else ""
     val suffix = if (end < normalizedText.length) "…" else ""
     return prefix + normalizedText.substring(start, end) + suffix
+}
+
+
+/** Decode selected images with bounded dimensions so huge phone photos don't exhaust memory. */
+private fun decodeSampledBitmap(context: Context, uri: Uri, maxDimension: Int): Bitmap {
+    require(maxDimension > 0) { "Maximum image dimension must be positive." }
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    val firstStream = context.contentResolver.openInputStream(uri)
+        ?: throw IllegalArgumentException("The selected image could not be opened.")
+    firstStream.use { BitmapFactory.decodeStream(it, null, bounds) }
+    require(bounds.outWidth > 0 && bounds.outHeight > 0) { "The selected file is not a supported image." }
+
+    var sampleSize = 1
+    while (maxOf(bounds.outWidth / sampleSize, bounds.outHeight / sampleSize) > maxDimension && sampleSize < (1 shl 20)) {
+        sampleSize *= 2
+    }
+    val options = BitmapFactory.Options().apply {
+        inSampleSize = sampleSize
+        inPreferredConfig = Bitmap.Config.ARGB_8888
+    }
+    val secondStream = context.contentResolver.openInputStream(uri)
+        ?: throw IllegalArgumentException("The selected image could not be opened.")
+    return secondStream.use { BitmapFactory.decodeStream(it, null, options) }
+        ?: throw IllegalArgumentException("The selected image could not be decoded.")
 }
 
 
