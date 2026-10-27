@@ -609,10 +609,21 @@ internal fun normalizePdfAnnotationText(raw: String): String {
         .replace('\u201D', '"')
         .replace('\u2013', '-')
         .replace('\u2014', '-')
-        .filter { it >= ' ' && it != '\u007f' }
         .trim()
-    require(normalized.isNotBlank()) { "Enter text to add to the PDF." }
-    return normalized.take(180)
+    val safe = buildString {
+        var offset = 0
+        while (offset < normalized.length) {
+            val codePoint = normalized.codePointAt(offset)
+            if (codePoint in 32..126 || codePoint in 160..255) {
+                append(codePoint.toChar())
+            } else {
+                append('?')
+            }
+            offset += Character.charCount(codePoint)
+        }
+    }.trim()
+    require(safe.isNotBlank()) { "Enter text to add to the PDF." }
+    return safe.take(180)
 }
 
 
