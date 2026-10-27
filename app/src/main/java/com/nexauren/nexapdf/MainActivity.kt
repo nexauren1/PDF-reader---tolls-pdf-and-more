@@ -104,6 +104,8 @@ private fun NexaPdfApp() {
     var tab by remember { mutableStateOf("home") }
     var activeUri by remember { mutableStateOf<Uri?>(null) }
     var activeName by remember { mutableStateOf("") }
+    // Keep a protected document password only in transient memory while it is open.
+    var activePassword by remember { mutableStateOf<String?>(null) }
     var page by remember { mutableIntStateOf(0) }
     var pageCount by remember { mutableIntStateOf(0) }
     var preview by remember { mutableStateOf<Bitmap?>(null) }
@@ -157,6 +159,7 @@ private fun NexaPdfApp() {
                 }
                 activeUri = uri
                 activeName = suppliedName ?: PdfOperations.displayName(context, uri)
+                activePassword = password
                 pageCount = result.first
                 page = index.coerceIn(0, (result.first - 1).coerceAtLeast(0))
                 preview = result.second
@@ -371,9 +374,9 @@ private fun NexaPdfApp() {
                     "documents" -> DocumentsScreen(pt, recentDocs, { launchTool("open") }, { loadPdf(Uri.parse(it.uri), 0, it.name) })
                     "settings" -> SettingsScreen(pt, { language = it; prefs.edit().putString("language", it).apply() }, { showAbout = true })
                     "reader" -> ReaderScreen(pt, activeName, preview, page, pageCount,
-                        { tab = "home" },
-                        { activeUri?.let { loadPdf(it, page - 1, activeName) } },
-                        { activeUri?.let { loadPdf(it, page + 1, activeName) } },
+                        { tab = "home"; activePassword = null },
+                        { activeUri?.let { loadPdf(it, page - 1, activeName, activePassword) } },
+                        { activeUri?.let { loadPdf(it, page + 1, activeName, activePassword) } },
                         {
                             activeUri?.let { uri ->
                                 val share = Intent(Intent.ACTION_SEND).apply {
