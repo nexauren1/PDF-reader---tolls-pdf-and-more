@@ -1,3 +1,5 @@
+import java.util.Base64
+
 val releaseKeystoreBase64 = System.getenv("NEXAPDF_KEYSTORE_BASE64").orEmpty()
 val releaseStorePassword = System.getenv("NEXAPDF_KEYSTORE_PASSWORD").orEmpty()
 val releaseKeyAlias = System.getenv("NEXAPDF_KEY_ALIAS").orEmpty()
@@ -10,7 +12,7 @@ val releaseKeystoreFile = rootProject.file("build/keys/nexapdf-release.jks")
 
 if (releaseSigningConfigured) {
     releaseKeystoreFile.parentFile.mkdirs()
-    releaseKeystoreFile.writeBytes(java.util.Base64.getDecoder().decode(releaseKeystoreBase64))
+    releaseKeystoreFile.writeBytes(Base64.getDecoder().decode(releaseKeystoreBase64))
 }
 
 plugins {
