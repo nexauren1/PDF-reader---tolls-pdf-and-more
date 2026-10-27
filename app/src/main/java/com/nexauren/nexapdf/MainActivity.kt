@@ -78,7 +78,7 @@ private val tools = listOf(
     PdfTool("image", "Imagem para PDF", "Image to PDF", "Cria um PDF a partir de imagens", "Create a PDF from images", Cyan, Icons.Filled.Image, true),
     PdfTool("rotate", "Rodar páginas", "Rotate pages", "Roda páginas 90° no sentido horário", "Rotate pages 90° clockwise", Orange, Icons.Filled.RotateRight, true),
     PdfTool("compress", "Comprimir PDF", "Compress PDF", "Reduz o tamanho do documento", "Reduce document size", Blue, Icons.Filled.Compress, true),
-    PdfTool("edit", "Editar e anotar", "Edit & annotate", "Texto, desenhos e realces", "Text, drawings and highlights", Pink, Icons.Filled.Edit),
+    PdfTool("edit", "Editar e assinar", "Annotate & sign", "Adiciona texto ou assinatura", "Add text or a drawn signature", Pink, Icons.Filled.Edit, true),
     PdfTool("scan", "Digitalizar", "Scan document", "Captura documentos pela câmara", "Capture documents with the camera", Cyan, Icons.Filled.CameraAlt),
     PdfTool("protect", "Proteger PDF", "Protect PDF", "Proteção por palavra-passe", "Password protection", Violet, Icons.Filled.Lock),
     PdfTool("ocr", "OCR", "OCR", "Torna digitalizações pesquisáveis", "Make scans searchable", Blue, Icons.Filled.Search),
