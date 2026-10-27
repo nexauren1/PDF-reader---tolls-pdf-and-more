@@ -115,12 +115,13 @@ private fun NexaPdfApp() {
     var pendingFile by remember { mutableStateOf<File?>(null) }
     var query by remember { mutableStateOf("") }
     var splitUri by remember { mutableStateOf<Uri?>(null) }
-    var splitCount by remember { mutableIntStateOf(1) }
     var splitStart by remember { mutableStateOf("1") }
-    var splitEnd by remember { mutableStateOf("1") }
+    var splitEnd by remember { mutableStateOf("") }
+    var splitPassword by remember { mutableStateOf("") }
     var showSplit by remember { mutableStateOf(false) }
     var rotateUri by remember { mutableStateOf<Uri?>(null) }
     var showRotate by remember { mutableStateOf(false) }
+    var rotatePassword by remember { mutableStateOf("") }
     var organizeUri by remember { mutableStateOf<Uri?>(null) }
     var showOrganizerDialog by remember { mutableStateOf(false) }
     var editUri by remember { mutableStateOf<Uri?>(null) }
@@ -180,7 +181,7 @@ private fun NexaPdfApp() {
                 passwordWasWrong = !password.isNullOrBlank()
                 showPasswordDialog = true
             } catch (e: Exception) {
-                snackbar.showSnackbar(e.message ?: if (pt) "Não foi possível abrir este PDF." else "Could not open this PDF.")
+                snackbar.showSnackbar(localizePdfError(e, pt))
             } finally { busy = false }
         }
     }
@@ -204,7 +205,11 @@ private fun NexaPdfApp() {
 
     val savePicker = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) { destination ->
         val source = pendingFile
-        if (destination != null && source != null) scope.launch {
+        if (destination == null) {
+            // The user cancelled the save picker; remove the temporary result file.
+            source?.delete()
+            pendingFile = null
+        } else if (source != null) scope.launch {
             try {
                 busy = true
                 busyText = if (pt) "A guardar PDF…" else "Saving PDF…"
@@ -223,8 +228,14 @@ private fun NexaPdfApp() {
                 rememberRecent(destination, savedName)
                 snackbar.showSnackbar(if (pt) "PDF guardado com sucesso." else "PDF saved successfully.")
             } catch (e: Exception) {
-                snackbar.showSnackbar(e.message ?: if (pt) "Falha ao guardar." else "Could not save file.")
-            } finally { busy = false; pendingFile = null }
+                snackbar.showSnackbar(localizePdfError(e, pt))
+            } finally {
+                source.delete()
+                busy = false
+                pendingFile = null
+            }
+        } else {
+            scope.launch { snackbar.showSnackbar(if (pt) "O resultado temporário já não está disponível." else "The temporary result is no longer available.") }
         }
     }
 
@@ -237,7 +248,7 @@ private fun NexaPdfApp() {
                 pendingFile = file
                 savePicker.launch(file.name)
             } catch (e: Exception) {
-                snackbar.showSnackbar(e.message ?: if (pt) "A operação falhou." else "The operation failed.")
+                snackbar.showSnackbar(localizePdfError(e, pt))
             } finally { busy = false }
         }
     }
@@ -274,18 +285,15 @@ private fun NexaPdfApp() {
         if (uris.isNotEmpty()) runOperation(if (pt) "A converter imagens…" else "Converting images…") { PdfOperations.imagesToPdf(context, uris) }
     }
     splitCallback = { uri ->
-        if (uri != null) scope.launch {
-            try {
-                val count = withContext(Dispatchers.IO) { PdfOperations.pageCount(context, uri) }
-                splitUri = uri
-                splitCount = count
-                splitStart = "1"
-                splitEnd = count.toString()
-                showSplit = true
-            } catch (e: Exception) { snackbar.showSnackbar(e.message ?: "Could not read PDF.") }
+        if (uri != null) {
+            splitUri = uri
+            splitStart = "1"
+            splitEnd = ""
+            splitPassword = ""
+            showSplit = true
         }
     }
-    rotateCallback = { uri -> if (uri != null) { rotateUri = uri; showRotate = true } }
+    rotateCallback = { uri -> if (uri != null) { rotateUri = uri; rotatePassword = ""; showRotate = true } }
     editCallback = { uri -> if (uri != null) { editUri = uri; showEditDialog = true } }
 
     val scanResultLauncher = rememberLauncherForActivityResult(
@@ -434,15 +442,44 @@ private fun NexaPdfApp() {
     }
 
     if (showSplit) AlertDialog(
-        onDismissRequest = { showSplit = false }, containerColor = Panel,
+        onDismissRequest = { showSplit = false },
+        containerColor = Panel,
         title = { Text(if (pt) "Dividir PDF" else "Split PDF", color = Color.White, fontWeight = FontWeight.Bold) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text((if (pt) "O PDF tem " else "This PDF has ") + splitCount + (if (pt) " páginas." else " pages."), color = SecondaryText)
+                Text(
+                    if (pt) "Extrai um intervalo de páginas para um novo ficheiro. O intervalo será validado contra o documento." else "Extract a page range into a new file. The range is checked against the document.",
+                    color = SecondaryText,
+                    fontSize = 12.sp
+                )
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(splitStart, { splitStart = it.filter(Char::isDigit).take(5) }, label = { Text(if (pt) "Página inicial" else "First page") }, modifier = Modifier.weight(1f), singleLine = true)
-                    OutlinedTextField(splitEnd, { splitEnd = it.filter(Char::isDigit).take(5) }, label = { Text(if (pt) "Página final" else "Last page") }, modifier = Modifier.weight(1f), singleLine = true)
+                    OutlinedTextField(
+                        value = splitStart,
+                        onValueChange = { splitStart = it.filter(Char::isDigit).take(5) },
+                        label = { Text(if (pt) "Página inicial" else "First page") },
+                        modifier = Modifier.weight(1f),
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                    )
+                    OutlinedTextField(
+                        value = splitEnd,
+                        onValueChange = { splitEnd = it.filter(Char::isDigit).take(5) },
+                        label = { Text(if (pt) "Página final" else "Last page") },
+                        modifier = Modifier.weight(1f),
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                    )
                 }
+                OutlinedTextField(
+                    value = splitPassword,
+                    onValueChange = { splitPassword = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    label = { Text(if (pt) "Palavra-passe (se necessária)" else "Password (if needed)") },
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Violet, unfocusedBorderColor = PanelAlt, focusedTextColor = Color.White, unfocusedTextColor = Color.White)
+                )
             }
         },
         confirmButton = {
@@ -450,13 +487,18 @@ private fun NexaPdfApp() {
                 val first = splitStart.toIntOrNull()
                 val last = splitEnd.toIntOrNull()
                 val uri = splitUri
-                if (uri == null || first == null || last == null || first < 1 || last < first || last > splitCount) {
+                if (uri == null || first == null || last == null || first < 1 || last < first) {
                     scope.launch { snackbar.showSnackbar(if (pt) "Intervalo inválido." else "Invalid page range.") }
                 } else {
+                    val password = splitPassword.takeIf { it.isNotBlank() }
                     showSplit = false
-                    runOperation(if (pt) "A extrair páginas…" else "Extracting pages…") { PdfOperations.split(context, uri, first, last) }
+                    runOperation(if (pt) "A extrair páginas…" else "Extracting pages…") {
+                        PdfOperations.split(context, uri, first, last, password)
+                    }
                 }
-            }, colors = ButtonDefaults.buttonColors(containerColor = Violet)) { Text(if (pt) "Extrair e guardar" else "Extract and save") }
+            }, colors = ButtonDefaults.buttonColors(containerColor = Violet)) {
+                Text(if (pt) "Extrair e guardar" else "Extract and save")
+            }
         },
         dismissButton = { TextButton(onClick = { showSplit = false }) { Text(if (pt) "Cancelar" else "Cancel") } }
     )
@@ -464,12 +506,29 @@ private fun NexaPdfApp() {
     if (showRotate) AlertDialog(
         onDismissRequest = { showRotate = false }, containerColor = Panel,
         title = { Text(if (pt) "Rodar páginas" else "Rotate pages", color = Color.White, fontWeight = FontWeight.Bold) },
-        text = { Text(if (pt) "Todas as páginas serão rodadas 90°. O original será mantido." else "All pages will be rotated 90°. The original file will be kept.", color = SecondaryText) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(if (pt) "Todas as páginas serão rodadas 90°. O original será mantido." else "All pages will be rotated 90°. The original file will be kept.", color = SecondaryText)
+                OutlinedTextField(
+                    value = rotatePassword,
+                    onValueChange = { rotatePassword = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    label = { Text(if (pt) "Palavra-passe (se necessária)" else "Password (if needed)") },
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Violet, unfocusedBorderColor = PanelAlt, focusedTextColor = Color.White, unfocusedTextColor = Color.White)
+                )
+            }
+        },
         confirmButton = {
             Button(onClick = {
                 val uri = rotateUri
+                val password = rotatePassword.takeIf { it.isNotBlank() }
                 showRotate = false
-                if (uri != null) runOperation(if (pt) "A rodar páginas…" else "Rotating pages…") { PdfOperations.rotateAllPages(context, uri) }
+                if (uri != null) runOperation(if (pt) "A rodar páginas…" else "Rotating pages…") {
+                    PdfOperations.rotateAllPages(context, uri, password)
+                }
             }, colors = ButtonDefaults.buttonColors(containerColor = Violet)) { Text(if (pt) "Rodar e guardar" else "Rotate and save") }
         },
         dismissButton = { TextButton(onClick = { showRotate = false }) { Text(if (pt) "Cancelar" else "Cancel") } }
@@ -480,18 +539,18 @@ private fun NexaPdfApp() {
             pt = pt,
             fileName = PdfOperations.displayName(context, editUri!!),
             onDismiss = { showEditDialog = false },
-            onApplyText = { pageNumber, text ->
+            onApplyText = { pageNumber, text, password ->
                 val uri = editUri
                 showEditDialog = false
                 if (uri != null) runOperation(if (pt) "A adicionar texto…" else "Adding text…") {
-                    PdfOperations.addTextAnnotation(context, uri, pageNumber, text)
+                    PdfOperations.addTextAnnotation(context, uri, pageNumber, text, password)
                 }
             },
-            onApplySignature = { pageNumber, bitmap ->
+            onApplySignature = { pageNumber, bitmap, password ->
                 val uri = editUri
                 showEditDialog = false
                 if (uri != null) runOperation(if (pt) "A inserir assinatura…" else "Adding signature…") {
-                    PdfOperations.addSignature(context, uri, pageNumber, bitmap)
+                    PdfOperations.addSignature(context, uri, pageNumber, bitmap, password)
                 }
             }
         )
@@ -502,11 +561,11 @@ private fun NexaPdfApp() {
             pt = pt,
             fileName = PdfOperations.displayName(context, compressionUri!!),
             onDismiss = { showCompressionDialog = false },
-            onCompress = { maxDimension, jpegQuality ->
+            onCompress = { maxDimension, jpegQuality, password ->
                 val uri = compressionUri
                 showCompressionDialog = false
                 if (uri != null) runOperation(if (pt) "A comprimir PDF…" else "Compressing PDF…") {
-                    PdfOperations.compressRasterizedPdf(context, uri, maxDimension, jpegQuality)
+                    PdfOperations.compressRasterizedPdf(context, uri, maxDimension, jpegQuality, password)
                 }
             }
         )
@@ -971,9 +1030,10 @@ private fun PdfCompressionDialog(
     pt: Boolean,
     fileName: String,
     onDismiss: () -> Unit,
-    onCompress: (Int, Int) -> Unit
+    onCompress: (Int, Int, String?) -> Unit
 ) {
     var preset by remember { mutableStateOf("balanced") }
+    var password by remember(fileName) { mutableStateOf("") }
     val settings = when (preset) {
         "small" -> 900 to 52
         "sharp" -> 1600 to 84
@@ -1011,6 +1071,21 @@ private fun PdfCompressionDialog(
                         }
                     }
                 }
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = { password = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    label = { Text(if (pt) "Palavra-passe (se necessária)" else "Password (if needed)") },
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Violet,
+                        unfocusedBorderColor = PanelAlt,
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White
+                    )
+                )
                 Surface(color = Color(0xFF36251D), shape = RoundedCornerShape(12.dp)) {
                     Row(Modifier.padding(11.dp), verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Icon(Icons.Filled.WarningAmber, null, tint = Orange, modifier = Modifier.size(20.dp))
@@ -1023,7 +1098,7 @@ private fun PdfCompressionDialog(
             }
         },
         confirmButton = {
-            Button(onClick = { onCompress(settings.first, settings.second) }, colors = ButtonDefaults.buttonColors(containerColor = Violet)) {
+            Button(onClick = { onCompress(settings.first, settings.second, password.takeIf { it.isNotBlank() }) }, colors = ButtonDefaults.buttonColors(containerColor = Violet)) {
                 Text(if (pt) "Comprimir e guardar" else "Compress and save")
             }
         },
@@ -1038,11 +1113,12 @@ private fun PdfEditDialog(
     pt: Boolean,
     fileName: String,
     onDismiss: () -> Unit,
-    onApplyText: (Int, String) -> Unit,
-    onApplySignature: (Int, Bitmap) -> Unit
+    onApplyText: (Int, String, String?) -> Unit,
+    onApplySignature: (Int, Bitmap, String?) -> Unit
 ) {
     var mode by remember { mutableStateOf("text") }
     var noteText by remember { mutableStateOf("") }
+    var password by remember(fileName) { mutableStateOf("") }
     var pageText by remember { mutableStateOf("1") }
     val strokes = remember { mutableStateListOf<MutableList<Offset>>() }
     var canvasSize by remember { mutableStateOf(IntSize.Zero) }
@@ -1139,6 +1215,16 @@ private fun PdfEditDialog(
                         }
                     }
                 }
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = { password = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    label = { Text(if (pt) "Palavra-passe (se necessária)" else "Password (if needed)") },
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Violet, unfocusedBorderColor = PanelAlt, focusedTextColor = Color.White, unfocusedTextColor = Color.White)
+                )
             }
         },
         confirmButton = {
@@ -1146,8 +1232,9 @@ private fun PdfEditDialog(
                 enabled = pageNumber != null && pageNumber > 0 && if (mode == "text") noteText.isNotBlank() else hasSignature && canvasSize.width > 0 && canvasSize.height > 0,
                 onClick = {
                     val page = pageNumber ?: return@Button
-                    if (mode == "text") onApplyText(page, noteText)
-                    else onApplySignature(page, createSignatureBitmap(strokes, canvasSize))
+                    val sourcePassword = password.takeIf { it.isNotBlank() }
+                    if (mode == "text") onApplyText(page, noteText, sourcePassword)
+                    else onApplySignature(page, createSignatureBitmap(strokes, canvasSize), sourcePassword)
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = Violet)
             ) { Text(if (pt) "Aplicar e guardar" else "Apply and save") }
@@ -1183,6 +1270,32 @@ private fun createSignatureBitmap(strokes: List<List<Offset>>, size: IntSize): B
     return bitmap
 }
 
+private fun localizePdfError(error: Throwable, pt: Boolean): String {
+    val message = error.localizedMessage?.takeIf { it.isNotBlank() }
+        ?: error.message?.takeIf { it.isNotBlank() }
+        ?: if (pt) "A operação falhou." else "The operation failed."
+    if (!pt) return message
+
+    val lower = message.lowercase()
+    return when {
+        "password" in lower || "encrypted" in lower || "decrypt" in lower ->
+            "Este PDF está protegido. Introduz a palavra-passe correta."
+        "page" in lower || "range" in lower || "interval" in lower ->
+            "Verifica o intervalo e os números das páginas."
+        "smaller" in lower || "compress" in lower ->
+            "Não foi possível reduzir o ficheiro com esta qualidade. Tenta outra opção."
+        "text was recognized" in lower || "recognized" in lower ->
+            "Não foi possível reconhecer texto. Experimenta uma digitalização mais nítida."
+        "image" in lower ->
+            "Não foi possível ler uma das imagens selecionadas."
+        "empty" in lower || "no pages" in lower ->
+            "O documento está vazio ou não contém páginas válidas."
+        "permission" in lower || "open this file" in lower || "could not open" in lower ->
+            "Não foi possível abrir o ficheiro. Confirma o acesso e tenta novamente."
+        else ->
+            "A operação não foi concluída. Verifica o ficheiro e tenta novamente."
+    }
+}
 @Composable
 private fun HomeScreen(
     pt: Boolean, recents: List<Recent>, query: String, onQuery: (String) -> Unit,

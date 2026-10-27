@@ -160,17 +160,19 @@ object PdfOperations {
         }
     }
 
-    fun split(context: Context, uri: Uri, firstPage: Int, lastPage: Int): File {
+    fun split(context: Context, uri: Uri, firstPage: Int, lastPage: Int, password: String? = null): File {
         prepare(context)
         val input = copyUriToCache(context, uri)
         val output = File.createTempFile("nexapdf_pages_", ".pdf", context.cacheDir)
         try {
-            PDDocument.load(input).use { source ->
+            openPdfDocument(input, password).use { source ->
                 val range = PageRange.of(firstPage, lastPage, source.numberOfPages)
+                val wasEncrypted = source.isEncrypted
                 PDDocument().use { destination ->
                     for (index in (range.firstPage - 1) until range.lastPage) {
                         destination.importPage(source.getPage(index))
                     }
+                    if (wasEncrypted && !password.isNullOrBlank()) protectDocumentCopy(destination, password)
                     destination.save(output)
                 }
             }
@@ -281,12 +283,12 @@ object PdfOperations {
         }
     }
 
-    fun rotateAllPages(context: Context, uri: Uri): File {
+    fun rotateAllPages(context: Context, uri: Uri, password: String? = null): File {
         prepare(context)
         val input = copyUriToCache(context, uri)
         val output = File.createTempFile("nexapdf_rotated_", ".pdf", context.cacheDir)
         try {
-            PDDocument.load(input).use { document ->
+            openPdfDocument(input, password).use { document ->
                 require(document.numberOfPages > 0) { "This PDF has no pages." }
                 for (page in document.pages) page.rotation = (page.rotation + 90) % 360
                 document.save(output)
@@ -424,7 +426,8 @@ object PdfOperations {
         context: Context,
         uri: Uri,
         maxPageDimension: Int,
-        jpegQuality: Int
+        jpegQuality: Int,
+        password: String? = null
     ): File {
         require(maxPageDimension in 700..2200) { "Choose a page size between 700 and 2200 pixels." }
         require(jpegQuality in 45..92) { "Choose JPEG quality between 45 and 92." }
@@ -432,41 +435,40 @@ object PdfOperations {
         val input = copyUriToCache(context, uri)
         val output = File.createTempFile("nexapdf_compressed_", ".pdf", context.cacheDir)
         try {
-            val descriptor = ParcelFileDescriptor.open(input, ParcelFileDescriptor.MODE_READ_ONLY)
-            descriptor.use { pfd ->
-                PdfRenderer(pfd).use { renderer ->
-                    require(renderer.pageCount > 0) { "This PDF has no pages." }
-                    PDDocument().use { destination ->
-                        for (index in 0 until renderer.pageCount) {
-                            renderer.openPage(index).use { sourcePage ->
-                                val longestSide = maxOf(sourcePage.width, sourcePage.height).coerceAtLeast(1)
-                                val scale = maxPageDimension.toFloat() / longestSide.toFloat()
-                                val pixelWidth = (sourcePage.width * scale).toInt().coerceAtLeast(1)
-                                val pixelHeight = (sourcePage.height * scale).toInt().coerceAtLeast(1)
-                                val bitmap = Bitmap.createBitmap(pixelWidth, pixelHeight, Bitmap.Config.ARGB_8888)
-                                val bytes = ByteArrayOutputStream()
-                                try {
-                                    bitmap.eraseColor(Color.WHITE)
-                                    val transform = android.graphics.Matrix().apply {
-                                        setScale(pixelWidth.toFloat() / sourcePage.width, pixelHeight.toFloat() / sourcePage.height)
-                                    }
-                                    sourcePage.render(bitmap, null, transform, PdfRenderer.Page.RENDER_MODE_FOR_PRINT)
-                                    val encoded = bitmap.compress(Bitmap.CompressFormat.JPEG, jpegQuality, bytes)
-                                    require(encoded && bytes.size() > 0) { "Page " + (index + 1) + " could not be compressed." }
-                                } finally {
-                                    bitmap.recycle()
-                                }
-
-                                val outputPage = PDPage(PDRectangle(sourcePage.width.toFloat(), sourcePage.height.toFloat()))
-                                destination.addPage(outputPage)
-                                val image = PDImageXObject.createFromByteArray(destination, bytes.toByteArray(), "compressed-page-" + (index + 1))
-                                PDPageContentStream(destination, outputPage).use { stream ->
-                                    stream.drawImage(image, 0f, 0f, outputPage.mediaBox.width, outputPage.mediaBox.height)
-                                }
-                            }
+            openPdfDocument(input, password).use { source ->
+                require(source.numberOfPages > 0) { "This PDF has no pages." }
+                val wasEncrypted = source.isEncrypted
+                val renderer = PDFRenderer(source)
+                PDDocument().use { destination ->
+                    for (index in 0 until source.numberOfPages) {
+                        val sourcePage = source.getPage(index)
+                        val crop = sourcePage.cropBox
+                        val longestSide = maxOf(crop.width, crop.height).coerceAtLeast(1f)
+                        val scale = maxPageDimension.toFloat() / longestSide
+                        val bitmap = renderer.renderImage(index, scale)
+                        val bytes = ByteArrayOutputStream()
+                        try {
+                            val encoded = bitmap.compress(Bitmap.CompressFormat.JPEG, jpegQuality, bytes)
+                            require(encoded && bytes.size() > 0) { "Page " + (index + 1) + " could not be compressed." }
+                        } finally {
+                            bitmap.recycle()
                         }
-                        destination.save(output)
+
+                        val rotation = ((sourcePage.rotation % 360) + 360) % 360
+                        val outputBox = if (rotation == 90 || rotation == 270) {
+                            PDRectangle(crop.height, crop.width)
+                        } else {
+                            PDRectangle(crop.width, crop.height)
+                        }
+                        val outputPage = PDPage(outputBox)
+                        destination.addPage(outputPage)
+                        val image = PDImageXObject.createFromByteArray(destination, bytes.toByteArray(), "compressed-page-" + (index + 1))
+                        PDPageContentStream(destination, outputPage).use { stream ->
+                            stream.drawImage(image, 0f, 0f, outputBox.width, outputBox.height)
+                        }
                     }
+                    if (wasEncrypted && !password.isNullOrBlank()) protectDocumentCopy(destination, password)
+                    destination.save(output)
                 }
             }
             require(output.exists() && output.length() > 0L) { "The compressed PDF could not be created." }
@@ -482,13 +484,13 @@ object PdfOperations {
         }
     }
 
-    fun addTextAnnotation(context: Context, uri: Uri, pageNumber: Int, rawText: String): File {
+    fun addTextAnnotation(context: Context, uri: Uri, pageNumber: Int, rawText: String, password: String? = null): File {
         prepare(context)
         val text = normalizePdfAnnotationText(rawText)
         val input = copyUriToCache(context, uri)
         val output = File.createTempFile("nexapdf_annotated_", ".pdf", context.cacheDir)
         try {
-            PDDocument.load(input).use { document ->
+            openPdfDocument(input, password).use { document ->
                 require(pageNumber in 1..document.numberOfPages) {
                     "Page number must be between 1 and " + document.numberOfPages + "."
                 }
@@ -516,13 +518,13 @@ object PdfOperations {
         }
     }
 
-    fun addSignature(context: Context, uri: Uri, pageNumber: Int, signature: Bitmap): File {
+    fun addSignature(context: Context, uri: Uri, pageNumber: Int, signature: Bitmap, password: String? = null): File {
         prepare(context)
         require(signature.width > 0 && signature.height > 0) { "The signature image is empty." }
         val input = copyUriToCache(context, uri)
         val output = File.createTempFile("nexapdf_signed_", ".pdf", context.cacheDir)
         try {
-            PDDocument.load(input).use { document ->
+            openPdfDocument(input, password).use { document ->
                 require(pageNumber in 1..document.numberOfPages) {
                     "Page number must be between 1 and " + document.numberOfPages + "."
                 }
@@ -609,10 +611,21 @@ internal fun normalizePdfAnnotationText(raw: String): String {
         .replace('\u201D', '"')
         .replace('\u2013', '-')
         .replace('\u2014', '-')
-        .filter { it >= ' ' && it != '\u007f' }
         .trim()
-    require(normalized.isNotBlank()) { "Enter text to add to the PDF." }
-    return normalized.take(180)
+    val safe = buildString {
+        var offset = 0
+        while (offset < normalized.length) {
+            val codePoint = normalized.codePointAt(offset)
+            if (codePoint in 32..126 || codePoint in 160..255) {
+                append(codePoint.toChar())
+            } else {
+                append('?')
+            }
+            offset += Character.charCount(codePoint)
+        }
+    }.trim()
+    require(safe.isNotBlank()) { "Enter text to add to the PDF." }
+    return safe.take(180)
 }
 
 
