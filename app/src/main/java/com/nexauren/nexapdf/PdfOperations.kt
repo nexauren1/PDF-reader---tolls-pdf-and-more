@@ -213,6 +213,9 @@ object PdfOperations {
                 }
             }
             require(output.exists() && output.length() > 0L) { "The compressed PDF could not be created." }
+            require(output.length() < input.length()) {
+                "This PDF did not become smaller with the selected quality. Try the Smallest preset."
+            }
             return output
         } catch (error: Exception) {
             output.delete()
