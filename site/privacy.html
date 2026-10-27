@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#07111f">
+<meta name="description" content="NexaPDF Android privacy policy.">
+<title>Privacy Policy — NexaPDF</title>
+<style>
+:root{color-scheme:dark;--bg:#07111f;--panel:#101e31;--text:#f5f7ff;--muted:#b5c2d5;--violet:#7357f6;--cyan:#42d6c5}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 10% 0%,#1b264a,transparent 36%),var(--bg);font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:var(--text);line-height:1.75}.wrap{max-width:850px;margin:auto;padding:35px 22px 60px}.top{display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:25px}.top a{color:var(--cyan);text-decoration:none}.brand{font-weight:850;font-size:20px;letter-spacing:-.5px}.brand span{color:var(--cyan)}h1{font-size:clamp(30px,5vw,42px);letter-spacing:-1.3px;line-height:1.2;margin:0 0 12px}.date{color:var(--muted);font-size:13px}article{background:rgba(16,30,49,.88);border:1px solid #263852;border-radius:22px;padding:clamp(20px,5vw,36px);margin-top:22px}h2{font-size:20px;line-height:1.35;margin:27px 0 8px}h2:first-child{margin-top:0}p,li{color:#d0d9e7}ul{padding-left:22px}a{color:var(--cyan)}.note{padding:14px 16px;border-left:3px solid var(--violet);background:#141e37;color:#e1e7f1;border-radius:8px;font-size:13px;margin-top:20px}footer{color:#8496b0;font-size:12px;margin-top:24px}
+</style>
+</head>
+<body><main class="wrap">
+<div class="top"><a class="brand" href="./">Nexa<span>PDF</span></a><a href="https://github.com/nexauren1/PDF-reader---tolls-pdf-and-more">Repository ↗</a></div>
+<h1>Privacy Policy</h1><div class="date">Effective date: 27 October 2026 · NexaPDF Android development version 0.1.x</div>
+<article>
+<p>NexaPDF is a PDF utility app developed under the Nexauren name. This policy describes the current development codebase and must be reviewed against the exact release build and Google Play declarations before publication.</p>
+<h2>1. What NexaPDF does</h2>
+<p>NexaPDF lets you open and read PDFs, combine or extract pages, rotate pages, convert selected images into PDFs, compress a PDF copy, add text or a drawn signature, protect a PDF with a password, scan documents, search PDF text, and add searchable text to scans with OCR.</p>
+<h2>2. Files and local processing</h2>
+<ul>
+<li>Core PDF operations are designed to run on your Android device. NexaPDF does not currently use a Nexauren-operated server to receive, store, or process documents.</li>
+<li>You choose which files to open using Android's document picker. NexaPDF does not request broad access to all shared storage.</li>
+<li>Temporary working copies may be placed in the app's private cache while an operation runs. Older NexaPDF temporary files are removed during normal cleanup, and Android may also clear app cache.</li>
+<li>When you save a result, you choose the destination. NexaPDF does not automatically upload the result.</li>
+<li>The recent-documents list stores the selected document URI and display name locally in app preferences, not the PDF contents.</li>
+<li>PDF passwords entered to open or protect a document are used in memory for that operation. The current implementation does not intentionally store those passwords in preferences or in the recent-documents list.</li>
+<li>OCR uses a bundled ML Kit text-recognition model to read page images on-device and add an invisible searchable text layer to a copy. The original remains unchanged. OCR currently expects upright pages.</li>
+</ul>
+<h2>3. Document scanner and third-party services</h2>
+<p>The optional document scanner uses Google ML Kit Document Scanner through Google Play services. Google Play services may need to download or update scanner components and are governed by Google's own terms and privacy practices. NexaPDF does not operate the scanner service. Review the <a href="https://policies.google.com/privacy">Google Privacy Policy</a> and <a href="https://developers.google.com/ml-kit/vision/doc-scanner">ML Kit Document Scanner documentation</a>.</p>
+<p>NexaPDF also uses open-source and Android platform libraries for PDF processing and interface rendering. Their licences and privacy documentation should be reviewed as part of every production release.</p>
+<h2>4. Information collection, advertising, and accounts</h2>
+<p>The current development build has no sign-in or account system, no Nexauren-operated cloud backend, and no advertising or analytics integration intentionally configured in the app. Android, Google Play services, and their components may process technical or diagnostic information as part of their own operation. The developer must verify the exact dependency behaviour and complete Google Play's Data safety form against the final APK/AAB.</p>
+<h2>5. Sharing</h2>
+<p>If you choose to share a PDF, Android opens the system share sheet and passes the selected document to the destination you choose. The recipient's privacy practices then apply. Do not share sensitive documents with a destination you do not trust.</p>
+<h2>6. Data retention and deletion</h2>
+<p>Recent document references are stored locally. You can clear NexaPDF's app storage from Android Settings to remove local preferences and cached data; this may also remove settings and recent-document entries. Files saved to a separate location are not deleted by clearing NexaPDF's app storage and must be managed in that location.</p>
+<h2>7. Children's privacy</h2>
+<p>NexaPDF is a general-purpose document utility and is not specifically designed to collect personal information from children. The current development build has no account creation or profile system.</p>
+<h2>8. Security limitations</h2>
+<p>Password protection uses standard PDF password encryption and permissions. It is not a guarantee against every method of copying or extracting content, and it is not a substitute for a cryptographic digital signature. Keep passwords safe; losing a password may make a protected document inaccessible.</p>
+<h2>9. Policy changes</h2>
+<p>This policy must be updated before any release that adds cloud processing, AI services, account sync, analytics, advertising, or other material data-handling changes.</p>
+<h2>10. Contact and support</h2>
+<p>For questions about NexaPDF's privacy practices, use the <a href="https://github.com/nexauren1/PDF-reader---tolls-pdf-and-more/issues">repository support/issues page</a>. Do not attach private documents, passwords, or other sensitive material to a public issue.</p>
+<div class="note"><strong>Release note:</strong> This is a policy draft for the development build. Before Google Play publication, confirm it against the exact release binary, all bundled SDKs, the app's permission list, and the required store declarations.</div>
+</article>
+<footer>Last reviewed for development build: 27 October 2026.</footer>
+</main></body></html>
