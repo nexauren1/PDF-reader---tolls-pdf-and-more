@@ -484,16 +484,17 @@ object PdfOperations {
         }
     }
 
-    fun addTextAnnotation(context: Context, uri: Uri, pageNumber: Int, rawText: String): File {
+    fun addTextAnnotation(context: Context, uri: Uri, pageNumber: Int, rawText: String, password: String? = null): File {
         prepare(context)
         val text = normalizePdfAnnotationText(rawText)
         val input = copyUriToCache(context, uri)
         val output = File.createTempFile("nexapdf_annotated_", ".pdf", context.cacheDir)
         try {
-            PDDocument.load(input).use { document ->
+            openPdfDocument(input, password).use { document ->
                 require(pageNumber in 1..document.numberOfPages) {
                     "Page number must be between 1 and " + document.numberOfPages + "."
                 }
+                val wasEncrypted = document.isEncrypted
                 val page = document.getPage(pageNumber - 1)
                 val box = page.mediaBox
                 PDPageContentStream(
@@ -506,6 +507,7 @@ object PdfOperations {
                     stream.showText(text)
                     stream.endText()
                 }
+                if (wasEncrypted && !password.isNullOrBlank()) protectDocumentCopy(document, password)
                 document.save(output)
             }
             require(output.exists() && output.length() > 0L) { "The annotated PDF could not be created." }
@@ -518,16 +520,17 @@ object PdfOperations {
         }
     }
 
-    fun addSignature(context: Context, uri: Uri, pageNumber: Int, signature: Bitmap): File {
+    fun addSignature(context: Context, uri: Uri, pageNumber: Int, signature: Bitmap, password: String? = null): File {
         prepare(context)
         require(signature.width > 0 && signature.height > 0) { "The signature image is empty." }
         val input = copyUriToCache(context, uri)
         val output = File.createTempFile("nexapdf_signed_", ".pdf", context.cacheDir)
         try {
-            PDDocument.load(input).use { document ->
+            openPdfDocument(input, password).use { document ->
                 require(pageNumber in 1..document.numberOfPages) {
                     "Page number must be between 1 and " + document.numberOfPages + "."
                 }
+                val wasEncrypted = document.isEncrypted
                 val page = document.getPage(pageNumber - 1)
                 val box = page.mediaBox
                 val availableWidth = (box.width - 72f).coerceAtLeast(80f)
@@ -545,6 +548,7 @@ object PdfOperations {
                         drawHeight.coerceAtMost(60f)
                     )
                 }
+                if (wasEncrypted && !password.isNullOrBlank()) protectDocumentCopy(document, password)
                 document.save(output)
             }
             require(output.exists() && output.length() > 0L) { "The signed PDF could not be created." }
