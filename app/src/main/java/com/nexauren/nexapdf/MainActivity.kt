@@ -235,7 +235,7 @@ private fun NexaPdfApp() {
                 pendingFile = null
             }
         } else {
-            snackbar.showSnackbar(if (pt) "O resultado temporário já não está disponível." else "The temporary result is no longer available.")
+            scope.launch { snackbar.showSnackbar(if (pt) "O resultado temporário já não está disponível." else "The temporary result is no longer available.") }
         }
     }
 
