@@ -115,9 +115,9 @@ private fun NexaPdfApp() {
     var pendingFile by remember { mutableStateOf<File?>(null) }
     var query by remember { mutableStateOf("") }
     var splitUri by remember { mutableStateOf<Uri?>(null) }
-    var splitCount by remember { mutableIntStateOf(1) }
     var splitStart by remember { mutableStateOf("1") }
-    var splitEnd by remember { mutableStateOf("1") }
+    var splitEnd by remember { mutableStateOf("") }
+    var splitPassword by remember { mutableStateOf("") }
     var showSplit by remember { mutableStateOf(false) }
     var rotateUri by remember { mutableStateOf<Uri?>(null) }
     var showRotate by remember { mutableStateOf(false) }
@@ -285,15 +285,12 @@ private fun NexaPdfApp() {
         if (uris.isNotEmpty()) runOperation(if (pt) "A converter imagens…" else "Converting images…") { PdfOperations.imagesToPdf(context, uris) }
     }
     splitCallback = { uri ->
-        if (uri != null) scope.launch {
-            try {
-                val count = withContext(Dispatchers.IO) { PdfOperations.pageCount(context, uri) }
-                splitUri = uri
-                splitCount = count
-                splitStart = "1"
-                splitEnd = count.toString()
-                showSplit = true
-            } catch (e: Exception) { snackbar.showSnackbar(e.message ?: "Could not read PDF.") }
+        if (uri != null) {
+            splitUri = uri
+            splitStart = "1"
+            splitEnd = ""
+            splitPassword = ""
+            showSplit = true
         }
     }
     rotateCallback = { uri -> if (uri != null) { rotateUri = uri; rotatePassword = ""; showRotate = true } }
@@ -445,15 +442,44 @@ private fun NexaPdfApp() {
     }
 
     if (showSplit) AlertDialog(
-        onDismissRequest = { showSplit = false }, containerColor = Panel,
+        onDismissRequest = { showSplit = false },
+        containerColor = Panel,
         title = { Text(if (pt) "Dividir PDF" else "Split PDF", color = Color.White, fontWeight = FontWeight.Bold) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text((if (pt) "O PDF tem " else "This PDF has ") + splitCount + (if (pt) " páginas." else " pages."), color = SecondaryText)
+                Text(
+                    if (pt) "Extrai um intervalo de páginas para um novo ficheiro. O intervalo será validado contra o documento." else "Extract a page range into a new file. The range is checked against the document.",
+                    color = SecondaryText,
+                    fontSize = 12.sp
+                )
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(splitStart, { splitStart = it.filter(Char::isDigit).take(5) }, label = { Text(if (pt) "Página inicial" else "First page") }, modifier = Modifier.weight(1f), singleLine = true)
-                    OutlinedTextField(splitEnd, { splitEnd = it.filter(Char::isDigit).take(5) }, label = { Text(if (pt) "Página final" else "Last page") }, modifier = Modifier.weight(1f), singleLine = true)
+                    OutlinedTextField(
+                        value = splitStart,
+                        onValueChange = { splitStart = it.filter(Char::isDigit).take(5) },
+                        label = { Text(if (pt) "Página inicial" else "First page") },
+                        modifier = Modifier.weight(1f),
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                    )
+                    OutlinedTextField(
+                        value = splitEnd,
+                        onValueChange = { splitEnd = it.filter(Char::isDigit).take(5) },
+                        label = { Text(if (pt) "Página final" else "Last page") },
+                        modifier = Modifier.weight(1f),
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                    )
                 }
+                OutlinedTextField(
+                    value = splitPassword,
+                    onValueChange = { splitPassword = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    label = { Text(if (pt) "Palavra-passe (se necessária)" else "Password (if needed)") },
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Violet, unfocusedBorderColor = PanelAlt, focusedTextColor = Color.White, unfocusedTextColor = Color.White)
+                )
             }
         },
         confirmButton = {
@@ -461,13 +487,18 @@ private fun NexaPdfApp() {
                 val first = splitStart.toIntOrNull()
                 val last = splitEnd.toIntOrNull()
                 val uri = splitUri
-                if (uri == null || first == null || last == null || first < 1 || last < first || last > splitCount) {
+                if (uri == null || first == null || last == null || first < 1 || last < first) {
                     scope.launch { snackbar.showSnackbar(if (pt) "Intervalo inválido." else "Invalid page range.") }
                 } else {
+                    val password = splitPassword.takeIf { it.isNotBlank() }
                     showSplit = false
-                    runOperation(if (pt) "A extrair páginas…" else "Extracting pages…") { PdfOperations.split(context, uri, first, last) }
+                    runOperation(if (pt) "A extrair páginas…" else "Extracting pages…") {
+                        PdfOperations.split(context, uri, first, last, password)
+                    }
                 }
-            }, colors = ButtonDefaults.buttonColors(containerColor = Violet)) { Text(if (pt) "Extrair e guardar" else "Extract and save") }
+            }, colors = ButtonDefaults.buttonColors(containerColor = Violet)) {
+                Text(if (pt) "Extrair e guardar" else "Extract and save")
+            }
         },
         dismissButton = { TextButton(onClick = { showSplit = false }) { Text(if (pt) "Cancelar" else "Cancel") } }
     )
