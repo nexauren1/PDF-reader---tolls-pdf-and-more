@@ -415,6 +415,11 @@ private fun NexaPdfApp() {
                                 }
                                 context.startActivity(Intent.createChooser(share, if (pt) "Partilhar PDF" else "Share PDF"))
                             }
+                        },
+                        {
+                            readerSearchQuery = ""
+                            readerSearchHits = emptyList()
+                            showReaderSearch = true
                         })
                 }
             }
@@ -1089,7 +1094,7 @@ private fun SettingsScreen(pt: Boolean, onLanguage: (String) -> Unit, onAbout: (
 @Composable
 private fun ReaderScreen(
     pt: Boolean, name: String, bitmap: Bitmap?, page: Int, count: Int,
-    onBack: () -> Unit, onPrev: () -> Unit, onNext: () -> Unit, onShare: () -> Unit
+    onBack: () -> Unit, onPrev: () -> Unit, onNext: () -> Unit, onShare: () -> Unit, onSearch: () -> Unit
 ) {
     Column(Modifier.fillMaxSize().background(AppBg)) {
         Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -1098,6 +1103,7 @@ private fun ReaderScreen(
                 Text(name, color = Color.White, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text((page + 1).toString() + " / " + count, color = SecondaryText, fontSize = 12.sp)
             }
+            IconButton(onClick = onSearch) { Icon(Icons.Filled.Search, null, tint = Cyan) }
             IconButton(onClick = onShare) { Icon(Icons.Filled.Share, null, tint = Cyan) }
         }
         Box(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 12.dp).clip(RoundedCornerShape(12.dp)).background(Color(0xFFE9EDF4)), contentAlignment = Alignment.Center) {
