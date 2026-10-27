@@ -7,7 +7,7 @@ NexaPDF is a PDF utility app developed under the Nexauren name. This document de
 
 ## 1. What NexaPDF does
 
-NexaPDF lets you open and read PDFs, combine or extract pages, rotate pages, convert selected images into PDFs, compress a PDF copy, add text or a drawn signature, protect a PDF with a password, scan documents, and add searchable text to scans with OCR.
+NexaPDF lets you open and read PDFs, search selectable text locally, combine or extract pages, remove or reorder pages, rotate pages, convert selected images into PDFs, compress a PDF copy, add text or a drawn signature, protect a PDF with a password, scan documents, and add searchable text to scans with OCR.
 
 ## 2. Files and processing
 
