@@ -36,6 +36,7 @@ import java.io.File
 import java.io.FileOutputStream
 import kotlin.math.min
 import java.util.UUID
+import java.security.MessageDigest
 
 /** Local-first PDF operations. Files stay in app cache until the user chooses where to save them. */
 object PdfOperations {
@@ -56,6 +57,44 @@ object PdfOperations {
         return name?.takeIf { it.isNotBlank() } ?: (uri.lastPathSegment ?: "document.pdf")
     }
 
+    private fun readCacheFile(context: Context, uri: Uri): File {
+        val digest = MessageDigest.getInstance("SHA-256").digest(uri.toString().toByteArray(Charsets.UTF_8))
+        val key = digest.take(12).joinToString("") { byte -> (byte.toInt() and 0xff).toString(16).padStart(2, '0') }
+        return File(context.cacheDir, "nexapdf_read_" + key + ".pdf")
+    }
+
+    /** Remove the reusable reading copy when the user explicitly re-selects a document. */
+    fun invalidateReadCache(context: Context, uri: Uri) {
+        readCacheFile(context, uri).delete()
+    }
+
+    private fun readCacheCopy(context: Context, uri: Uri): File {
+        val cached = readCacheFile(context, uri)
+        if (cached.exists() && cached.length() > 0L) {
+            cached.setLastModified(System.currentTimeMillis())
+            return cached
+        }
+
+        val temporary = File.createTempFile("nexapdf_read_", ".tmp", context.cacheDir)
+        try {
+            val source = context.contentResolver.openInputStream(uri)
+                ?: throw IllegalArgumentException("Android could not open this document.")
+            source.use { input -> FileOutputStream(temporary).use { output -> input.copyTo(output) } }
+            require(temporary.length() > 0L) { "The selected document is empty." }
+            if (cached.exists()) cached.delete()
+            if (!temporary.renameTo(cached)) {
+                temporary.copyTo(cached, overwrite = true)
+                temporary.delete()
+            }
+            cached.setLastModified(System.currentTimeMillis())
+            return cached
+        } catch (error: Exception) {
+            temporary.delete()
+            cached.delete()
+            throw error
+        }
+    }
+
     fun copyUriToCache(context: Context, uri: Uri, suffix: String = ".pdf"): File {
         val result = File.createTempFile("nexapdf_input_", suffix, context.cacheDir)
         val input = context.contentResolver.openInputStream(uri)
@@ -66,29 +105,21 @@ object PdfOperations {
     }
 
     fun pageCount(context: Context, uri: Uri, password: String? = null): Int {
-        val file = copyUriToCache(context, uri)
-        return try {
-            openPdfDocument(file, password).use { document -> document.numberOfPages }
-        } finally {
-            file.delete()
-        }
+        val file = readCacheCopy(context, uri)
+        return openPdfDocument(file, password).use { document -> document.numberOfPages }
     }
 
     fun renderPage(context: Context, uri: Uri, pageIndex: Int, password: String? = null, maxWidth: Int = 1200): Bitmap {
-        val file = copyUriToCache(context, uri)
-        return try {
-            openPdfDocument(file, password).use { document ->
-                require(document.numberOfPages > 0) { "This PDF has no pages." }
-                val safeIndex = pageIndex.coerceIn(0, document.numberOfPages - 1)
-                val cropBox = document.getPage(safeIndex).cropBox
-                require(maxWidth > 0) { "Preview width must be positive." }
-                val longestSide = maxOf(cropBox.width, cropBox.height).coerceAtLeast(1f)
-                // Cap the longest bitmap dimension instead of forcing a large minimum scale.
-                val scale = min(maxWidth.toFloat() / longestSide, 2f).coerceAtLeast(0.001f)
-                PDFRenderer(document).renderImage(safeIndex, scale)
-            }
-        } finally {
-            file.delete()
+        val file = readCacheCopy(context, uri)
+        return openPdfDocument(file, password).use { document ->
+            require(document.numberOfPages > 0) { "This PDF has no pages." }
+            val safeIndex = pageIndex.coerceIn(0, document.numberOfPages - 1)
+            val cropBox = document.getPage(safeIndex).cropBox
+            require(maxWidth > 0) { "Preview width must be positive." }
+            val longestSide = maxOf(cropBox.width, cropBox.height).coerceAtLeast(1f)
+            // Cap the longest bitmap dimension instead of forcing a large minimum scale.
+            val scale = min(maxWidth.toFloat() / longestSide, 2f).coerceAtLeast(0.001f)
+            PDFRenderer(document).renderImage(safeIndex, scale)
         }
     }
 
