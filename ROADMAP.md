@@ -8,7 +8,7 @@
 - [x] Merge PDFs, extract page ranges, rotate all pages, images to PDF
 - [x] Save output through Android's document picker
 - [x] Add Android build workflow and basic page-range unit tests
-- [ ] Confirm CI produces an APK
+- [x] Confirm GitHub Actions produces a debug APK (build passed on 27 Oct 2026)
 - [ ] Install and test on a physical device
 
 ## Milestone 0.2 — Editing tools
