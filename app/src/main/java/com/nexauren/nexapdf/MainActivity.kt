@@ -181,7 +181,7 @@ private fun NexaPdfApp() {
                 passwordWasWrong = !password.isNullOrBlank()
                 showPasswordDialog = true
             } catch (e: Exception) {
-                snackbar.showSnackbar(e.message ?: if (pt) "Não foi possível abrir este PDF." else "Could not open this PDF.")
+                snackbar.showSnackbar(localizePdfError(e, pt))
             } finally { busy = false }
         }
     }
@@ -228,7 +228,7 @@ private fun NexaPdfApp() {
                 rememberRecent(destination, savedName)
                 snackbar.showSnackbar(if (pt) "PDF guardado com sucesso." else "PDF saved successfully.")
             } catch (e: Exception) {
-                snackbar.showSnackbar(e.message ?: if (pt) "Falha ao guardar." else "Could not save file.")
+                snackbar.showSnackbar(localizePdfError(e, pt))
             } finally {
                 source.delete()
                 busy = false
@@ -248,7 +248,7 @@ private fun NexaPdfApp() {
                 pendingFile = file
                 savePicker.launch(file.name)
             } catch (e: Exception) {
-                snackbar.showSnackbar(e.message ?: if (pt) "A operação falhou." else "The operation failed.")
+                snackbar.showSnackbar(localizePdfError(e, pt))
             } finally { busy = false }
         }
     }
@@ -1270,6 +1270,32 @@ private fun createSignatureBitmap(strokes: List<List<Offset>>, size: IntSize): B
     return bitmap
 }
 
+private fun localizePdfError(error: Throwable, pt: Boolean): String {
+    val message = error.localizedMessage?.takeIf { it.isNotBlank() }
+        ?: error.message?.takeIf { it.isNotBlank() }
+        ?: if (pt) "A operação falhou." else "The operation failed."
+    if (!pt) return message
+
+    val lower = message.lowercase()
+    return when {
+        "password" in lower || "encrypted" in lower || "decrypt" in lower ->
+            "Este PDF está protegido. Introduz a palavra-passe correta."
+        "page" in lower || "range" in lower || "interval" in lower ->
+            "Verifica o intervalo e os números das páginas."
+        "smaller" in lower || "compress" in lower ->
+            "Não foi possível reduzir o ficheiro com esta qualidade. Tenta outra opção."
+        "text was recognized" in lower || "recognized" in lower ->
+            "Não foi possível reconhecer texto. Experimenta uma digitalização mais nítida."
+        "image" in lower ->
+            "Não foi possível ler uma das imagens selecionadas."
+        "empty" in lower || "no pages" in lower ->
+            "O documento está vazio ou não contém páginas válidas."
+        "permission" in lower || "open this file" in lower || "could not open" in lower ->
+            "Não foi possível abrir o ficheiro. Confirma o acesso e tenta novamente."
+        else ->
+            "A operação não foi concluída. Verifica o ficheiro e tenta novamente."
+    }
+}
 @Composable
 private fun HomeScreen(
     pt: Boolean, recents: List<Recent>, query: String, onQuery: (String) -> Unit,
