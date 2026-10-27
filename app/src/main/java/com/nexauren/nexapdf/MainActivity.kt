@@ -157,12 +157,13 @@ private fun NexaPdfApp() {
         prefs.edit().putString("recent", recentDocs.joinToString("\n") { it.uri + "\u001f" + it.name }).apply()
     }
 
-    fun loadPdf(uri: Uri, index: Int = 0, suppliedName: String? = null, password: String? = null) {
+    fun loadPdf(uri: Uri, index: Int = 0, suppliedName: String? = null, password: String? = null, forceRefresh: Boolean = false) {
         scope.launch {
             try {
                 busy = true
                 busyText = if (pt) "A abrir PDF…" else "Opening PDF…"
                 val result = withContext(Dispatchers.IO) {
+                    if (forceRefresh) PdfOperations.invalidateReadCache(context, uri)
                     val count = PdfOperations.pageCount(context, uri, password)
                     val bitmap = PdfOperations.renderPage(context, uri, index.coerceIn(0, (count - 1).coerceAtLeast(0)), password)
                     Pair(count, bitmap)
@@ -189,7 +190,7 @@ private fun NexaPdfApp() {
     val openPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             try { context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (_: Exception) { }
-            loadPdf(uri)
+            loadPdf(uri, forceRefresh = true)
         }
     }
 
@@ -415,7 +416,7 @@ private fun NexaPdfApp() {
         ) { padding ->
             Box(Modifier.fillMaxSize().padding(padding)) {
                 when (tab) {
-                    "home" -> HomeScreen(pt, recentDocs, query, { query = it }, { launchTool("open") }, ::launchTool, { loadPdf(Uri.parse(it.uri), 0, it.name) }, { tab = "documents" })
+                    "home" -> HomeScreen(pt, recentDocs, query, { query = it }, { launchTool("open") }, ::launchTool, { loadPdf(Uri.parse(it.uri), 0, it.name, forceRefresh = true) }, { tab = "documents" })
                     "tools" -> ToolsScreen(pt, ::launchTool)
                     "documents" -> DocumentsScreen(pt, recentDocs, { launchTool("open") }, { loadPdf(Uri.parse(it.uri), 0, it.name) })
                     "settings" -> SettingsScreen(pt, { language = it; prefs.edit().putString("language", it).apply() }, { showAbout = true })
