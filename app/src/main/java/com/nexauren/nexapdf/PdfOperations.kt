@@ -492,13 +492,19 @@ internal fun normalizeOcrLine(raw: String): String {
         .replace('\u2013', '-')
         .replace('\u2014', '-')
         .replace('\u2022', '-')
-        .map { char ->
-            val code = char.code
-            if ((code in 32..126) || (code in 160..255)) char else '?'
-        }
-        .joinToString("")
         .trim()
-    return normalized.take(400)
+    val output = StringBuilder()
+    var offset = 0
+    while (offset < normalized.length) {
+        val codePoint = normalized.codePointAt(offset)
+        if ((codePoint in 32..126) || (codePoint in 160..255)) {
+            output.append(codePoint.toChar())
+        } else {
+            output.append('?')
+        }
+        offset += Character.charCount(codePoint)
+    }
+    return output.toString().take(400)
 }
 
 
