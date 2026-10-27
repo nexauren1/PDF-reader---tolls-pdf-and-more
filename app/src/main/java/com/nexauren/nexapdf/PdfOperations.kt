@@ -16,6 +16,9 @@ import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
 import com.tom_roush.pdfbox.io.MemoryUsageSetting
 import com.tom_roush.pdfbox.multipdf.PDFMergerUtility
 import com.tom_roush.pdfbox.pdmodel.PDDocument
+import com.tom_roush.pdfbox.pdmodel.PDPageContentStream
+import com.tom_roush.pdfbox.pdmodel.font.PDType1Font
+import com.tom_roush.pdfbox.pdmodel.graphics.image.LosslessFactory
 import java.io.File
 import java.io.FileOutputStream
 import kotlin.math.min
@@ -150,6 +153,79 @@ object PdfOperations {
         }
     }
 
+    fun addTextAnnotation(context: Context, uri: Uri, pageNumber: Int, rawText: String): File {
+        prepare(context)
+        val text = normalizePdfAnnotationText(rawText)
+        val input = copyUriToCache(context, uri)
+        val output = File.createTempFile("nexapdf_annotated_", ".pdf", context.cacheDir)
+        try {
+            PDDocument.load(input).use { document ->
+                require(pageNumber in 1..document.numberOfPages) {
+                    "Page number must be between 1 and " + document.numberOfPages + "."
+                }
+                val page = document.getPage(pageNumber - 1)
+                val box = page.mediaBox
+                PDPageContentStream(
+                    document, page, PDPageContentStream.AppendMode.APPEND, true, true
+                ).use { stream ->
+                    stream.beginText()
+                    stream.setFont(PDType1Font.HELVETICA, 12f)
+                    stream.setNonStrokingColor(115, 87, 246)
+                    stream.newLineAtOffset(box.lowerLeftX + 36f, box.lowerLeftY + 36f)
+                    stream.showText(text)
+                    stream.endText()
+                }
+                document.save(output)
+            }
+            require(output.exists() && output.length() > 0L) { "The annotated PDF could not be created." }
+            return output
+        } catch (error: Exception) {
+            output.delete()
+            throw error
+        } finally {
+            input.delete()
+        }
+    }
+
+    fun addSignature(context: Context, uri: Uri, pageNumber: Int, signature: Bitmap): File {
+        prepare(context)
+        require(signature.width > 0 && signature.height > 0) { "The signature image is empty." }
+        val input = copyUriToCache(context, uri)
+        val output = File.createTempFile("nexapdf_signed_", ".pdf", context.cacheDir)
+        try {
+            PDDocument.load(input).use { document ->
+                require(pageNumber in 1..document.numberOfPages) {
+                    "Page number must be between 1 and " + document.numberOfPages + "."
+                }
+                val page = document.getPage(pageNumber - 1)
+                val box = page.mediaBox
+                val availableWidth = (box.width - 72f).coerceAtLeast(80f)
+                val drawWidth = min(180f, availableWidth)
+                val drawHeight = drawWidth * signature.height.toFloat() / signature.width.toFloat()
+                val image = LosslessFactory.createFromImage(document, signature)
+                PDPageContentStream(
+                    document, page, PDPageContentStream.AppendMode.APPEND, true, true
+                ).use { stream ->
+                    stream.drawImage(
+                        image,
+                        box.lowerLeftX + 36f,
+                        box.lowerLeftY + 36f,
+                        drawWidth,
+                        drawHeight.coerceAtMost(60f)
+                    )
+                }
+                document.save(output)
+            }
+            require(output.exists() && output.length() > 0L) { "The signed PDF could not be created." }
+            return output
+        } catch (error: Exception) {
+            output.delete()
+            throw error
+        } finally {
+            input.delete()
+        }
+    }
+
     /** Converts selected images to a real PDF using Android's built-in PdfDocument API. */
     fun imagesToPdf(context: Context, uris: List<Uri>): File {
         require(uris.isNotEmpty()) { "Select at least one image." }
@@ -188,4 +264,23 @@ object PdfOperations {
         require(output.exists() && output.length() > 0L) { "The PDF could not be created." }
         return output
     }
+}
+
+
+/** Clean single-line text for a PDF text operator using the built-in WinAnsi Helvetica font. */
+internal fun normalizePdfAnnotationText(raw: String): String {
+    val normalized = raw
+        .replace('\n', ' ')
+        .replace('\r', ' ')
+        .replace('\t', ' ')
+        .replace('\u2018', '\'')
+        .replace('\u2019', '\'')
+        .replace('\u201C', '"')
+        .replace('\u201D', '"')
+        .replace('\u2013', '-')
+        .replace('\u2014', '-')
+        .filter { it >= ' ' && it != '\u007f' }
+        .trim()
+    require(normalized.isNotBlank()) { "Enter text to add to the PDF." }
+    return normalized.take(180)
 }
