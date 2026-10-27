@@ -90,6 +90,13 @@ object PdfOperations {
         }
     }
 
+    private fun protectDocumentCopy(document: PDDocument, password: String) {
+        val ownerPassword = UUID.randomUUID().toString() + UUID.randomUUID().toString()
+        val policy = StandardProtectionPolicy(ownerPassword, password, AccessPermission())
+        policy.setEncryptionKeyLength(128)
+        document.protect(policy)
+    }
+
     private fun openPdfDocument(file: File, password: String?): PDDocument {
         return try {
             PDDocument.load(file, password.orEmpty(), MemoryUsageSetting.setupTempFileOnly())
@@ -198,6 +205,7 @@ object PdfOperations {
                             destination.importPage(source.getPage(index))
                         }
                     }
+                    if (source.isEncrypted && !password.isNullOrBlank()) protectDocumentCopy(destination, password)
                     destination.save(output)
                 }
             }
@@ -227,6 +235,37 @@ object PdfOperations {
                     order.forEach { pageNumber ->
                         destination.importPage(source.getPage(pageNumber - 1))
                     }
+                    if (source.isEncrypted && !password.isNullOrBlank()) protectDocumentCopy(destination, password)
+                    destination.save(output)
+                }
+            }
+            require(output.exists() && output.length() > 0L) { "The reordered PDF could not be created." }
+            return output
+        } catch (error: Exception) {
+            output.delete()
+            throw error
+        } finally {
+            input.delete()
+        }
+    }
+
+    fun reorderPages(
+        context: Context,
+        uri: Uri,
+        pageOrderText: String,
+        password: String? = null
+    ): File {
+        prepare(context)
+        val input = copyUriToCache(context, uri)
+        val output = File.createTempFile("nexapdf_reordered_", ".pdf", context.cacheDir)
+        try {
+            openPdfDocument(input, password).use { source ->
+                val order = parsePageOrder(pageOrderText, source.numberOfPages)
+                PDDocument().use { destination ->
+                    order.forEach { pageNumber ->
+                        destination.importPage(source.getPage(pageNumber - 1))
+                    }
+                    if (source.isEncrypted && !password.isNullOrBlank()) protectDocumentCopy(destination, password)
                     destination.save(output)
                 }
             }
