@@ -81,8 +81,10 @@ object PdfOperations {
                 require(document.numberOfPages > 0) { "This PDF has no pages." }
                 val safeIndex = pageIndex.coerceIn(0, document.numberOfPages - 1)
                 val cropBox = document.getPage(safeIndex).cropBox
+                require(maxWidth > 0) { "Preview width must be positive." }
                 val longestSide = maxOf(cropBox.width, cropBox.height).coerceAtLeast(1f)
-                val scale = min(maxWidth.toFloat() / longestSide, 2f).coerceAtLeast(0.5f)
+                // Cap the longest bitmap dimension instead of forcing a large minimum scale.
+                val scale = min(maxWidth.toFloat() / longestSide, 2f).coerceAtLeast(0.001f)
                 PDFRenderer(document).renderImage(safeIndex, scale)
             }
         } finally {
@@ -354,7 +356,9 @@ object PdfOperations {
                             "OCR currently needs upright pages. Rotate this PDF to 0° and try again."
                         }
                         val crop = page.cropBox
-                        val bitmap = renderer.renderImage(index, 1.5f)
+                        val longestSide = maxOf(crop.width, crop.height).coerceAtLeast(1f)
+                        val renderScale = min(1.5f, 1800f / longestSide).coerceAtLeast(0.001f)
+                        val bitmap = renderer.renderImage(index, renderScale)
                         try {
                             val recognized = Tasks.await(
                                 recognizer.process(InputImage.fromBitmap(bitmap, 0))
@@ -561,9 +565,7 @@ object PdfOperations {
         val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
         try {
             uris.forEachIndexed { index, uri ->
-                val bitmap = context.contentResolver.openInputStream(uri)?.use { stream ->
-                    BitmapFactory.decodeStream(stream)
-                } ?: throw IllegalArgumentException("An image could not be read.")
+                val bitmap = decodeSampledBitmap(context, uri, maxDimension = 2200)
                 try {
                     val pageInfo = PdfDocument.PageInfo.Builder(pageWidth, pageHeight, index + 1).create()
                     val page = pdf.startPage(pageInfo)
@@ -648,6 +650,30 @@ internal fun findPdfSearchSnippet(pageText: String, query: String): String? {
     val prefix = if (start > 0) "…" else ""
     val suffix = if (end < normalizedText.length) "…" else ""
     return prefix + normalizedText.substring(start, end) + suffix
+}
+
+
+/** Decode selected images with bounded dimensions so huge phone photos don't exhaust memory. */
+private fun decodeSampledBitmap(context: Context, uri: Uri, maxDimension: Int): Bitmap {
+    require(maxDimension > 0) { "Maximum image dimension must be positive." }
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    val firstStream = context.contentResolver.openInputStream(uri)
+        ?: throw IllegalArgumentException("The selected image could not be opened.")
+    firstStream.use { BitmapFactory.decodeStream(it, null, bounds) }
+    require(bounds.outWidth > 0 && bounds.outHeight > 0) { "The selected file is not a supported image." }
+
+    var sampleSize = 1
+    while (maxOf(bounds.outWidth / sampleSize, bounds.outHeight / sampleSize) > maxDimension && sampleSize < (1 shl 20)) {
+        sampleSize *= 2
+    }
+    val options = BitmapFactory.Options().apply {
+        inSampleSize = sampleSize
+        inPreferredConfig = Bitmap.Config.ARGB_8888
+    }
+    val secondStream = context.contentResolver.openInputStream(uri)
+        ?: throw IllegalArgumentException("The selected image could not be opened.")
+    return secondStream.use { BitmapFactory.decodeStream(it, null, options) }
+        ?: throw IllegalArgumentException("The selected image could not be decoded.")
 }
 
 
