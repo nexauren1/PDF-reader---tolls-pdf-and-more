@@ -507,7 +507,7 @@ internal fun normalizePdfAnnotationText(raw: String): String {
 }
 
 
-internal data class PdfSearchHit(val pageNumber: Int, val snippet: String)
+data class PdfSearchHit(val pageNumber: Int, val snippet: String)
 
 internal fun findPdfSearchSnippet(pageText: String, query: String): String? {
     val search = query.trim()
