@@ -1,3 +1,20 @@
+import java.util.Base64
+
+val releaseKeystoreBase64 = System.getenv("NEXAPDF_KEYSTORE_BASE64").orEmpty()
+val releaseStorePassword = System.getenv("NEXAPDF_KEYSTORE_PASSWORD").orEmpty()
+val releaseKeyAlias = System.getenv("NEXAPDF_KEY_ALIAS").orEmpty()
+val releaseKeyPassword = System.getenv("NEXAPDF_KEY_PASSWORD").orEmpty()
+val releaseSigningConfigured = releaseKeystoreBase64.isNotBlank() &&
+    releaseStorePassword.isNotBlank() &&
+    releaseKeyAlias.isNotBlank() &&
+    releaseKeyPassword.isNotBlank()
+val releaseKeystoreFile = rootProject.file("build/keys/nexapdf-release.jks")
+
+if (releaseSigningConfigured) {
+    releaseKeystoreFile.parentFile.mkdirs()
+    releaseKeystoreFile.writeBytes(Base64.getDecoder().decode(releaseKeystoreBase64))
+}
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -5,6 +22,17 @@ plugins {
 }
 
 android {
+    signingConfigs {
+        if (releaseSigningConfigured) {
+            create("release") {
+                storeFile = releaseKeystoreFile
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
+    }
+
     namespace = "com.nexauren.nexapdf"
     compileSdk = 35
     defaultConfig {
@@ -19,6 +47,9 @@ android {
     buildTypes {
         debug { applicationIdSuffix = ".debug"; versionNameSuffix = "-debug" }
         release {
+            if (releaseSigningConfigured) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             isMinifyEnabled = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }

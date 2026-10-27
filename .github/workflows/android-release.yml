@@ -1,0 +1,59 @@
+name: Signed Android release bundle
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  release-bundle:
+    runs-on: ubuntu-latest
+    env:
+      NEXAPDF_KEYSTORE_BASE64: ${{ secrets.NEXAPDF_KEYSTORE_BASE64 }}
+      NEXAPDF_KEYSTORE_PASSWORD: ${{ secrets.NEXAPDF_KEYSTORE_PASSWORD }}
+      NEXAPDF_KEY_ALIAS: ${{ secrets.NEXAPDF_KEY_ALIAS }}
+      NEXAPDF_KEY_PASSWORD: ${{ secrets.NEXAPDF_KEY_PASSWORD }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate signing secrets
+        shell: bash
+        run: |
+          if [[ -z "$NEXAPDF_KEYSTORE_BASE64" || -z "$NEXAPDF_KEYSTORE_PASSWORD" || -z "$NEXAPDF_KEY_ALIAS" || -z "$NEXAPDF_KEY_PASSWORD" ]]; then
+            echo "Configure the four NEXAPDF_* repository secrets described in RELEASE.md."
+            exit 1
+          fi
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: "platform-tools platforms;android-35 build-tools;35.0.0"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.11.1"
+
+      - name: Build signed release outputs
+        run: gradle --no-daemon bundleRelease assembleRelease
+
+      - name: Upload signed AAB and APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexapdf-release-${{ github.ref_name }}
+          path: |
+            app/build/outputs/bundle/release/app-release.aab
+            app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
+          retention-days: 30
