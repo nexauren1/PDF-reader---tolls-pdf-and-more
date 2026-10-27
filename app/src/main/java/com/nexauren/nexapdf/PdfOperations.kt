@@ -175,6 +175,71 @@ object PdfOperations {
         }
     }
 
+    fun removePageRange(
+        context: Context,
+        uri: Uri,
+        firstPage: Int,
+        lastPage: Int,
+        password: String? = null
+    ): File {
+        prepare(context)
+        val input = copyUriToCache(context, uri)
+        val output = File.createTempFile("nexapdf_removed_", ".pdf", context.cacheDir)
+        try {
+            openPdfDocument(input, password).use { source ->
+                val range = PageRange.of(firstPage, lastPage, source.numberOfPages)
+                require(range.pageCount < source.numberOfPages) {
+                    "You cannot remove every page from a PDF."
+                }
+                PDDocument().use { destination ->
+                    for (index in 0 until source.numberOfPages) {
+                        val pageNumber = index + 1
+                        if (pageNumber !in range.firstPage..range.lastPage) {
+                            destination.importPage(source.getPage(index))
+                        }
+                    }
+                    destination.save(output)
+                }
+            }
+            require(output.exists() && output.length() > 0L) { "The edited PDF could not be created." }
+            return output
+        } catch (error: Exception) {
+            output.delete()
+            throw error
+        } finally {
+            input.delete()
+        }
+    }
+
+    fun reorderPages(
+        context: Context,
+        uri: Uri,
+        pageOrder: List<Int>,
+        password: String? = null
+    ): File {
+        prepare(context)
+        val input = copyUriToCache(context, uri)
+        val output = File.createTempFile("nexapdf_reordered_", ".pdf", context.cacheDir)
+        try {
+            openPdfDocument(input, password).use { source ->
+                val order = validatePageOrder(pageOrder, source.numberOfPages)
+                PDDocument().use { destination ->
+                    order.forEach { pageNumber ->
+                        destination.importPage(source.getPage(pageNumber - 1))
+                    }
+                    destination.save(output)
+                }
+            }
+            require(output.exists() && output.length() > 0L) { "The reordered PDF could not be created." }
+            return output
+        } catch (error: Exception) {
+            output.delete()
+            throw error
+        } finally {
+            input.delete()
+        }
+    }
+
     fun rotateAllPages(context: Context, uri: Uri): File {
         prepare(context)
         val input = copyUriToCache(context, uri)
@@ -504,6 +569,30 @@ internal fun normalizePdfAnnotationText(raw: String): String {
         .trim()
     require(normalized.isNotBlank()) { "Enter text to add to the PDF." }
     return normalized.take(180)
+}
+
+
+internal fun parsePageOrder(input: String, pageCount: Int): List<Int> {
+    require(pageCount > 0) { "The PDF has no pages." }
+    val values = input.split(',').map { token ->
+        token.trim().toIntOrNull()
+            ?: throw IllegalArgumentException("Use a comma-separated list of page numbers.")
+    }
+    return validatePageOrder(values, pageCount)
+}
+
+internal fun validatePageOrder(values: List<Int>, pageCount: Int): List<Int> {
+    require(pageCount > 0) { "The PDF has no pages." }
+    require(values.size == pageCount) {
+        "Enter every page number exactly once (1 to " + pageCount + ")."
+    }
+    require(values.all { it in 1..pageCount }) {
+        "Page numbers must be between 1 and " + pageCount + "."
+    }
+    require(values.toSet().size == pageCount) {
+        "Each page number must appear exactly once."
+    }
+    return values.toList()
 }
 
 
