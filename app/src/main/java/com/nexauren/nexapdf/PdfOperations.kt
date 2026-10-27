@@ -205,13 +205,13 @@ object PdfOperations {
      * Original page artwork remains intact. Intended for image/scanned PDFs; already searchable
      * documents can receive duplicate search text, so the UI warns before processing.
      */
-    fun createSearchablePdf(context: Context, uri: Uri): File {
+    fun createSearchablePdf(context: Context, uri: Uri, password: String? = null): File {
         prepare(context)
         val input = copyUriToCache(context, uri)
         val output = File.createTempFile("nexapdf_searchable_", ".pdf", context.cacheDir)
         var recognizedLines = 0
         try {
-            openPdfDocument(input, null).use { document ->
+            openPdfDocument(input, password).use { document ->
                 require(document.numberOfPages > 0) { "This PDF has no pages." }
                 val renderer = PDFRenderer(document)
                 val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
