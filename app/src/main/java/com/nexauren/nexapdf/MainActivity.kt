@@ -39,6 +39,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.IntSize
@@ -85,7 +88,7 @@ private val tools = listOf(
     PdfTool("compress", "Comprimir PDF", "Compress PDF", "Reduz o tamanho do documento", "Reduce document size", Blue, Icons.Filled.Compress, true),
     PdfTool("edit", "Editar e assinar", "Annotate & sign", "Adiciona texto ou assinatura", "Add text or a drawn signature", Pink, Icons.Filled.Edit, true),
     PdfTool("scan", "Digitalizar", "Scan document", "Captura e corrige documentos", "Capture and crop documents", Cyan, Icons.Filled.CameraAlt, true),
-    PdfTool("protect", "Proteger PDF", "Protect PDF", "Proteção por palavra-passe", "Password protection", Violet, Icons.Filled.Lock),
+    PdfTool("protect", "Proteger PDF", "Protect PDF", "Proteção por palavra-passe", "Password protection", Violet, Icons.Filled.Lock, true),
     PdfTool("ocr", "OCR", "OCR", "Torna digitalizações pesquisáveis", "Make scans searchable", Blue, Icons.Filled.Search),
     PdfTool("translate", "Traduzir PDF", "Translate PDF", "Tradução online opcional", "Optional online translation", Pink, Icons.Filled.Translate)
 )
@@ -119,6 +122,12 @@ private fun NexaPdfApp() {
     var showEditDialog by remember { mutableStateOf(false) }
     var compressionUri by remember { mutableStateOf<Uri?>(null) }
     var showCompressionDialog by remember { mutableStateOf(false) }
+    var protectUri by remember { mutableStateOf<Uri?>(null) }
+    var showProtectionDialog by remember { mutableStateOf(false) }
+    var passwordUri by remember { mutableStateOf<Uri?>(null) }
+    var passwordName by remember { mutableStateOf("") }
+    var passwordWasWrong by remember { mutableStateOf(false) }
+    var showPasswordDialog by remember { mutableStateOf(false) }
     var showAbout by remember { mutableStateOf(false) }
     val recentDocs = remember {
         mutableStateListOf<Recent>().apply {
@@ -136,14 +145,14 @@ private fun NexaPdfApp() {
         prefs.edit().putString("recent", recentDocs.joinToString("\n") { it.uri + "\u001f" + it.name }).apply()
     }
 
-    fun loadPdf(uri: Uri, index: Int = 0, suppliedName: String? = null) {
+    fun loadPdf(uri: Uri, index: Int = 0, suppliedName: String? = null, password: String? = null) {
         scope.launch {
             try {
                 busy = true
                 busyText = if (pt) "A abrir PDF…" else "Opening PDF…"
                 val result = withContext(Dispatchers.IO) {
-                    val count = PdfOperations.pageCount(context, uri)
-                    val bitmap = PdfOperations.renderPage(context, uri, index.coerceIn(0, (count - 1).coerceAtLeast(0)))
+                    val count = PdfOperations.pageCount(context, uri, password)
+                    val bitmap = PdfOperations.renderPage(context, uri, index.coerceIn(0, (count - 1).coerceAtLeast(0)), password)
                     Pair(count, bitmap)
                 }
                 activeUri = uri
@@ -153,6 +162,11 @@ private fun NexaPdfApp() {
                 preview = result.second
                 tab = "reader"
                 rememberRecent(uri, activeName)
+            } catch (e: PdfPasswordRequiredException) {
+                passwordUri = uri
+                passwordName = suppliedName ?: PdfOperations.displayName(context, uri)
+                passwordWasWrong = !password.isNullOrBlank()
+                showPasswordDialog = true
             } catch (e: Exception) {
                 snackbar.showSnackbar(e.message ?: if (pt) "Não foi possível abrir este PDF." else "Could not open this PDF.")
             } finally { busy = false }
@@ -229,6 +243,9 @@ private fun NexaPdfApp() {
     val editPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { editCallback(it) }
     val compressionPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) { compressionUri = uri; showCompressionDialog = true }
+    }
+    val protectionPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) { protectUri = uri; showProtectionDialog = true }
     }
 
     mergeCallback = { uris ->
@@ -318,6 +335,7 @@ private fun NexaPdfApp() {
             "rotate" -> rotatePicker.launch(arrayOf("application/pdf"))
             "edit" -> editPicker.launch(arrayOf("application/pdf"))
             "compress" -> compressionPicker.launch(arrayOf("application/pdf"))
+            "protect" -> protectionPicker.launch(arrayOf("application/pdf"))
             "scan" -> startDocumentScanner()
             else -> scope.launch {
                 snackbar.showSnackbar(if (pt) "Esta ferramenta está em desenvolvimento e ainda não está ativa." else "This tool is in development and is not active yet.")
