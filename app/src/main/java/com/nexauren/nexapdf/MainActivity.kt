@@ -466,6 +466,37 @@ private fun NexaPdfApp() {
         )
     }
 
+    if (showPasswordDialog && passwordUri != null) {
+        PdfPasswordDialog(
+            pt = pt,
+            fileName = passwordName,
+            previousAttemptFailed = passwordWasWrong,
+            onDismiss = { showPasswordDialog = false; passwordUri = null; passwordWasWrong = false },
+            onSubmit = { enteredPassword ->
+                val uri = passwordUri
+                val name = passwordName
+                showPasswordDialog = false
+                passwordWasWrong = false
+                if (uri != null) loadPdf(uri, 0, name, enteredPassword)
+            }
+        )
+    }
+
+    if (showProtectionDialog && protectUri != null) {
+        PdfProtectionDialog(
+            pt = pt,
+            fileName = PdfOperations.displayName(context, protectUri!!),
+            onDismiss = { showProtectionDialog = false; protectUri = null },
+            onProtect = { newPassword ->
+                val uri = protectUri
+                showProtectionDialog = false
+                if (uri != null) runOperation(if (pt) "A proteger PDF…" else "Protecting PDF…") {
+                    PdfOperations.protectWithPassword(context, uri, newPassword)
+                }
+            }
+        )
+    }
+
     if (showAbout) AlertDialog(
         onDismissRequest = { showAbout = false }, containerColor = Panel,
         title = { Text("NexaPDF · 0.1.0", color = Color.White) },
@@ -477,6 +508,128 @@ private fun NexaPdfApp() {
         onDismissRequest = {}, containerColor = Panel, confirmButton = {},
         title = { Text(busyText, color = Color.White) },
         text = { Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) { CircularProgressIndicator(color = Cyan, modifier = Modifier.size(26.dp)); Text(if (pt) "A processar no dispositivo…" else "Processing on this device…", color = SecondaryText) } }
+    )
+}
+
+@Composable
+private fun PdfPasswordDialog(
+    pt: Boolean,
+    fileName: String,
+    previousAttemptFailed: Boolean,
+    onDismiss: () -> Unit,
+    onSubmit: (String) -> Unit
+) {
+    var password by remember(fileName) { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Panel,
+        title = {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(if (pt) "PDF protegido" else "Password-protected PDF", color = Color.White, fontWeight = FontWeight.Bold)
+                Text(fileName, color = SecondaryText, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                Text(
+                    if (previousAttemptFailed) {
+                        if (pt) "A palavra-passe está incorreta. Tenta novamente." else "That password was incorrect. Try again."
+                    } else {
+                        if (pt) "Este documento precisa de uma palavra-passe para ser aberto." else "This document needs a password to open."
+                    },
+                    color = if (previousAttemptFailed) Orange else SecondaryText,
+                    fontSize = 12.sp
+                )
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = { password = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    label = { Text(if (pt) "Palavra-passe do PDF" else "PDF password") },
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Violet,
+                        unfocusedBorderColor = PanelAlt,
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White
+                    )
+                )
+            }
+        },
+        confirmButton = {
+            Button(onClick = { onSubmit(password) }, enabled = password.isNotEmpty(), colors = ButtonDefaults.buttonColors(containerColor = Violet)) {
+                Text(if (pt) "Abrir PDF" else "Open PDF")
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(if (pt) "Cancelar" else "Cancel") } }
+    )
+}
+
+@Composable
+private fun PdfProtectionDialog(
+    pt: Boolean,
+    fileName: String,
+    onDismiss: () -> Unit,
+    onProtect: (String) -> Unit
+) {
+    var password by remember(fileName) { mutableStateOf("") }
+    var confirmPassword by remember(fileName) { mutableStateOf("") }
+    val valid = password.length >= 8 && password == confirmPassword
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Panel,
+        title = {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(if (pt) "Proteger PDF" else "Protect PDF", color = Color.White, fontWeight = FontWeight.Bold)
+                Text(fileName, color = SecondaryText, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    if (pt) "Cria uma cópia protegida por palavra-passe. O ficheiro original não será alterado." else "Create a password-protected copy. The original file will not be changed.",
+                    color = SecondaryText, fontSize = 12.sp
+                )
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = { password = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    label = { Text(if (pt) "Nova palavra-passe" else "New password") },
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    supportingText = { Text(if (pt) "Usa pelo menos 8 caracteres." else "Use at least 8 characters.") },
+                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Violet, unfocusedBorderColor = PanelAlt, focusedTextColor = Color.White, unfocusedTextColor = Color.White)
+                )
+                OutlinedTextField(
+                    value = confirmPassword,
+                    onValueChange = { confirmPassword = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    label = { Text(if (pt) "Confirmar palavra-passe" else "Confirm password") },
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    isError = confirmPassword.isNotEmpty() && password != confirmPassword,
+                    supportingText = {
+                        if (confirmPassword.isNotEmpty() && password != confirmPassword) {
+                            Text(if (pt) "As palavras-passe não coincidem." else "Passwords do not match.")
+                        }
+                    },
+                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Violet, unfocusedBorderColor = PanelAlt, focusedTextColor = Color.White, unfocusedTextColor = Color.White)
+                )
+                Text(
+                    if (pt) "Se perderes a palavra-passe, poderás não conseguir recuperar o documento." else "If you lose this password, you may not be able to recover the document.",
+                    color = Orange, fontSize = 11.sp
+                )
+            }
+        },
+        confirmButton = {
+            Button(onClick = { onProtect(password) }, enabled = valid, colors = ButtonDefaults.buttonColors(containerColor = Violet)) {
+                Text(if (pt) "Proteger e guardar" else "Protect and save")
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(if (pt) "Cancelar" else "Cancel") } }
     )
 }
 
