@@ -39,6 +39,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.IntSize
@@ -85,7 +88,7 @@ private val tools = listOf(
     PdfTool("compress", "Comprimir PDF", "Compress PDF", "Reduz o tamanho do documento", "Reduce document size", Blue, Icons.Filled.Compress, true),
     PdfTool("edit", "Editar e assinar", "Annotate & sign", "Adiciona texto ou assinatura", "Add text or a drawn signature", Pink, Icons.Filled.Edit, true),
     PdfTool("scan", "Digitalizar", "Scan document", "Captura e corrige documentos", "Capture and crop documents", Cyan, Icons.Filled.CameraAlt, true),
-    PdfTool("protect", "Proteger PDF", "Protect PDF", "Proteção por palavra-passe", "Password protection", Violet, Icons.Filled.Lock),
+    PdfTool("protect", "Proteger PDF", "Protect PDF", "Proteção por palavra-passe", "Password protection", Violet, Icons.Filled.Lock, true),
     PdfTool("ocr", "OCR", "OCR", "Torna digitalizações pesquisáveis", "Make scans searchable", Blue, Icons.Filled.Search),
     PdfTool("translate", "Traduzir PDF", "Translate PDF", "Tradução online opcional", "Optional online translation", Pink, Icons.Filled.Translate)
 )
@@ -119,6 +122,12 @@ private fun NexaPdfApp() {
     var showEditDialog by remember { mutableStateOf(false) }
     var compressionUri by remember { mutableStateOf<Uri?>(null) }
     var showCompressionDialog by remember { mutableStateOf(false) }
+    var protectUri by remember { mutableStateOf<Uri?>(null) }
+    var showProtectionDialog by remember { mutableStateOf(false) }
+    var passwordUri by remember { mutableStateOf<Uri?>(null) }
+    var passwordName by remember { mutableStateOf("") }
+    var passwordWasWrong by remember { mutableStateOf(false) }
+    var showPasswordDialog by remember { mutableStateOf(false) }
     var showAbout by remember { mutableStateOf(false) }
     val recentDocs = remember {
         mutableStateListOf<Recent>().apply {
@@ -136,14 +145,14 @@ private fun NexaPdfApp() {
         prefs.edit().putString("recent", recentDocs.joinToString("\n") { it.uri + "\u001f" + it.name }).apply()
     }
 
-    fun loadPdf(uri: Uri, index: Int = 0, suppliedName: String? = null) {
+    fun loadPdf(uri: Uri, index: Int = 0, suppliedName: String? = null, password: String? = null) {
         scope.launch {
             try {
                 busy = true
                 busyText = if (pt) "A abrir PDF…" else "Opening PDF…"
                 val result = withContext(Dispatchers.IO) {
-                    val count = PdfOperations.pageCount(context, uri)
-                    val bitmap = PdfOperations.renderPage(context, uri, index.coerceIn(0, (count - 1).coerceAtLeast(0)))
+                    val count = PdfOperations.pageCount(context, uri, password)
+                    val bitmap = PdfOperations.renderPage(context, uri, index.coerceIn(0, (count - 1).coerceAtLeast(0)), password)
                     Pair(count, bitmap)
                 }
                 activeUri = uri
@@ -153,6 +162,11 @@ private fun NexaPdfApp() {
                 preview = result.second
                 tab = "reader"
                 rememberRecent(uri, activeName)
+            } catch (e: PdfPasswordRequiredException) {
+                passwordUri = uri
+                passwordName = suppliedName ?: PdfOperations.displayName(context, uri)
+                passwordWasWrong = !password.isNullOrBlank()
+                showPasswordDialog = true
             } catch (e: Exception) {
                 snackbar.showSnackbar(e.message ?: if (pt) "Não foi possível abrir este PDF." else "Could not open this PDF.")
             } finally { busy = false }
@@ -229,6 +243,9 @@ private fun NexaPdfApp() {
     val editPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { editCallback(it) }
     val compressionPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) { compressionUri = uri; showCompressionDialog = true }
+    }
+    val protectionPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) { protectUri = uri; showProtectionDialog = true }
     }
 
     mergeCallback = { uris ->
@@ -318,6 +335,7 @@ private fun NexaPdfApp() {
             "rotate" -> rotatePicker.launch(arrayOf("application/pdf"))
             "edit" -> editPicker.launch(arrayOf("application/pdf"))
             "compress" -> compressionPicker.launch(arrayOf("application/pdf"))
+            "protect" -> protectionPicker.launch(arrayOf("application/pdf"))
             "scan" -> startDocumentScanner()
             else -> scope.launch {
                 snackbar.showSnackbar(if (pt) "Esta ferramenta está em desenvolvimento e ainda não está ativa." else "This tool is in development and is not active yet.")
@@ -448,6 +466,37 @@ private fun NexaPdfApp() {
         )
     }
 
+    if (showPasswordDialog && passwordUri != null) {
+        PdfPasswordDialog(
+            pt = pt,
+            fileName = passwordName,
+            previousAttemptFailed = passwordWasWrong,
+            onDismiss = { showPasswordDialog = false; passwordUri = null; passwordWasWrong = false },
+            onSubmit = { enteredPassword ->
+                val uri = passwordUri
+                val name = passwordName
+                showPasswordDialog = false
+                passwordWasWrong = false
+                if (uri != null) loadPdf(uri, 0, name, enteredPassword)
+            }
+        )
+    }
+
+    if (showProtectionDialog && protectUri != null) {
+        PdfProtectionDialog(
+            pt = pt,
+            fileName = PdfOperations.displayName(context, protectUri!!),
+            onDismiss = { showProtectionDialog = false; protectUri = null },
+            onProtect = { newPassword ->
+                val uri = protectUri
+                showProtectionDialog = false
+                if (uri != null) runOperation(if (pt) "A proteger PDF…" else "Protecting PDF…") {
+                    PdfOperations.protectWithPassword(context, uri, newPassword)
+                }
+            }
+        )
+    }
+
     if (showAbout) AlertDialog(
         onDismissRequest = { showAbout = false }, containerColor = Panel,
         title = { Text("NexaPDF · 0.1.0", color = Color.White) },
@@ -459,6 +508,128 @@ private fun NexaPdfApp() {
         onDismissRequest = {}, containerColor = Panel, confirmButton = {},
         title = { Text(busyText, color = Color.White) },
         text = { Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) { CircularProgressIndicator(color = Cyan, modifier = Modifier.size(26.dp)); Text(if (pt) "A processar no dispositivo…" else "Processing on this device…", color = SecondaryText) } }
+    )
+}
+
+@Composable
+private fun PdfPasswordDialog(
+    pt: Boolean,
+    fileName: String,
+    previousAttemptFailed: Boolean,
+    onDismiss: () -> Unit,
+    onSubmit: (String) -> Unit
+) {
+    var password by remember(fileName) { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Panel,
+        title = {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(if (pt) "PDF protegido" else "Password-protected PDF", color = Color.White, fontWeight = FontWeight.Bold)
+                Text(fileName, color = SecondaryText, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                Text(
+                    if (previousAttemptFailed) {
+                        if (pt) "A palavra-passe está incorreta. Tenta novamente." else "That password was incorrect. Try again."
+                    } else {
+                        if (pt) "Este documento precisa de uma palavra-passe para ser aberto." else "This document needs a password to open."
+                    },
+                    color = if (previousAttemptFailed) Orange else SecondaryText,
+                    fontSize = 12.sp
+                )
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = { password = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    label = { Text(if (pt) "Palavra-passe do PDF" else "PDF password") },
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Violet,
+                        unfocusedBorderColor = PanelAlt,
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White
+                    )
+                )
+            }
+        },
+        confirmButton = {
+            Button(onClick = { onSubmit(password) }, enabled = password.isNotEmpty(), colors = ButtonDefaults.buttonColors(containerColor = Violet)) {
+                Text(if (pt) "Abrir PDF" else "Open PDF")
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(if (pt) "Cancelar" else "Cancel") } }
+    )
+}
+
+@Composable
+private fun PdfProtectionDialog(
+    pt: Boolean,
+    fileName: String,
+    onDismiss: () -> Unit,
+    onProtect: (String) -> Unit
+) {
+    var password by remember(fileName) { mutableStateOf("") }
+    var confirmPassword by remember(fileName) { mutableStateOf("") }
+    val valid = password.length >= 8 && password == confirmPassword
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Panel,
+        title = {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(if (pt) "Proteger PDF" else "Protect PDF", color = Color.White, fontWeight = FontWeight.Bold)
+                Text(fileName, color = SecondaryText, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    if (pt) "Cria uma cópia protegida por palavra-passe. O ficheiro original não será alterado." else "Create a password-protected copy. The original file will not be changed.",
+                    color = SecondaryText, fontSize = 12.sp
+                )
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = { password = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    label = { Text(if (pt) "Nova palavra-passe" else "New password") },
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    supportingText = { Text(if (pt) "Usa pelo menos 8 caracteres." else "Use at least 8 characters.") },
+                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Violet, unfocusedBorderColor = PanelAlt, focusedTextColor = Color.White, unfocusedTextColor = Color.White)
+                )
+                OutlinedTextField(
+                    value = confirmPassword,
+                    onValueChange = { confirmPassword = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    label = { Text(if (pt) "Confirmar palavra-passe" else "Confirm password") },
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    isError = confirmPassword.isNotEmpty() && password != confirmPassword,
+                    supportingText = {
+                        if (confirmPassword.isNotEmpty() && password != confirmPassword) {
+                            Text(if (pt) "As palavras-passe não coincidem." else "Passwords do not match.")
+                        }
+                    },
+                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Violet, unfocusedBorderColor = PanelAlt, focusedTextColor = Color.White, unfocusedTextColor = Color.White)
+                )
+                Text(
+                    if (pt) "Se perderes a palavra-passe, poderás não conseguir recuperar o documento." else "If you lose this password, you may not be able to recover the document.",
+                    color = Orange, fontSize = 11.sp
+                )
+            }
+        },
+        confirmButton = {
+            Button(onClick = { onProtect(password) }, enabled = valid, colors = ButtonDefaults.buttonColors(containerColor = Violet)) {
+                Text(if (pt) "Proteger e guardar" else "Protect and save")
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(if (pt) "Cancelar" else "Cancel") } }
     )
 }
 
