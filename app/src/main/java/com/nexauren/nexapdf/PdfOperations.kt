@@ -288,9 +288,7 @@ object PdfOperations {
         try {
             openPdfDocument(input, password).use { document ->
                 require(document.numberOfPages > 0) { "This PDF has no pages." }
-                val wasEncrypted = document.isEncrypted
                 for (page in document.pages) page.rotation = (page.rotation + 90) % 360
-                if (wasEncrypted && !password.isNullOrBlank()) protectDocumentCopy(document, password)
                 document.save(output)
             }
             require(output.length() > 0L) { "The rotated PDF could not be created." }
@@ -494,7 +492,6 @@ object PdfOperations {
                 require(pageNumber in 1..document.numberOfPages) {
                     "Page number must be between 1 and " + document.numberOfPages + "."
                 }
-                val wasEncrypted = document.isEncrypted
                 val page = document.getPage(pageNumber - 1)
                 val box = page.mediaBox
                 PDPageContentStream(
@@ -507,7 +504,6 @@ object PdfOperations {
                     stream.showText(text)
                     stream.endText()
                 }
-                if (wasEncrypted && !password.isNullOrBlank()) protectDocumentCopy(document, password)
                 document.save(output)
             }
             require(output.exists() && output.length() > 0L) { "The annotated PDF could not be created." }
@@ -530,7 +526,6 @@ object PdfOperations {
                 require(pageNumber in 1..document.numberOfPages) {
                     "Page number must be between 1 and " + document.numberOfPages + "."
                 }
-                val wasEncrypted = document.isEncrypted
                 val page = document.getPage(pageNumber - 1)
                 val box = page.mediaBox
                 val availableWidth = (box.width - 72f).coerceAtLeast(80f)
@@ -548,7 +543,6 @@ object PdfOperations {
                         drawHeight.coerceAtMost(60f)
                     )
                 }
-                if (wasEncrypted && !password.isNullOrBlank()) protectDocumentCopy(document, password)
                 document.save(output)
             }
             require(output.exists() && output.length() > 0L) { "The signed PDF could not be created." }
