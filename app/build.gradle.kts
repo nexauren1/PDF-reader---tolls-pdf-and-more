@@ -34,11 +34,11 @@ android {
     }
 
     namespace = "com.nexauren.nexapdf"
-    compileSdk = 35
+    compileSdk = 36
     defaultConfig {
         applicationId = "com.nexauren.nexapdf"
         minSdk = 24
-        targetSdk = 35
+        targetSdk = 36
         versionCode = 1
         versionName = "0.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
