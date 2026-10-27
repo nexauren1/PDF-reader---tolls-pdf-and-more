@@ -530,11 +530,11 @@ private fun NexaPdfApp() {
             pt = pt,
             fileName = PdfOperations.displayName(context, compressionUri!!),
             onDismiss = { showCompressionDialog = false },
-            onCompress = { maxDimension, jpegQuality ->
+            onCompress = { maxDimension, jpegQuality, password ->
                 val uri = compressionUri
                 showCompressionDialog = false
                 if (uri != null) runOperation(if (pt) "A comprimir PDF…" else "Compressing PDF…") {
-                    PdfOperations.compressRasterizedPdf(context, uri, maxDimension, jpegQuality)
+                    PdfOperations.compressRasterizedPdf(context, uri, maxDimension, jpegQuality, password)
                 }
             }
         )
@@ -999,9 +999,10 @@ private fun PdfCompressionDialog(
     pt: Boolean,
     fileName: String,
     onDismiss: () -> Unit,
-    onCompress: (Int, Int) -> Unit
+    onCompress: (Int, Int, String?) -> Unit
 ) {
     var preset by remember { mutableStateOf("balanced") }
+    var password by remember(fileName) { mutableStateOf("") }
     val settings = when (preset) {
         "small" -> 900 to 52
         "sharp" -> 1600 to 84
@@ -1039,6 +1040,21 @@ private fun PdfCompressionDialog(
                         }
                     }
                 }
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = { password = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    label = { Text(if (pt) "Palavra-passe (se necessária)" else "Password (if needed)") },
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Violet,
+                        unfocusedBorderColor = PanelAlt,
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White
+                    )
+                )
                 Surface(color = Color(0xFF36251D), shape = RoundedCornerShape(12.dp)) {
                     Row(Modifier.padding(11.dp), verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Icon(Icons.Filled.WarningAmber, null, tint = Orange, modifier = Modifier.size(20.dp))
@@ -1051,7 +1067,7 @@ private fun PdfCompressionDialog(
             }
         },
         confirmButton = {
-            Button(onClick = { onCompress(settings.first, settings.second) }, colors = ButtonDefaults.buttonColors(containerColor = Violet)) {
+            Button(onClick = { onCompress(settings.first, settings.second, password.takeIf { it.isNotBlank() }) }, colors = ButtonDefaults.buttonColors(containerColor = Violet)) {
                 Text(if (pt) "Comprimir e guardar" else "Compress and save")
             }
         },
