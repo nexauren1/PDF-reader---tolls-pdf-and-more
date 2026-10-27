@@ -585,6 +585,9 @@ object PdfOperations {
                 }
             }
             FileOutputStream(output).use { pdf.writeTo(it) }
+        } catch (error: Exception) {
+            output.delete()
+            throw error
         } finally {
             pdf.close()
         }
