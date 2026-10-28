@@ -26,7 +26,7 @@
 <li>When you save a result, you choose the destination. NexaPDF does not automatically upload the result.</li>
 <li>The recent-documents list stores the selected document URI and display name locally in app preferences, not the PDF contents.</li>
 <li>PDF passwords entered to open or protect a document are used in memory for that operation. The current implementation does not intentionally store those passwords in preferences or in the recent-documents list.</li>
-<li>OCR uses a bundled ML Kit text-recognition model to read page images on-device and add an invisible searchable text layer to a copy. The original remains unchanged. OCR currently expects upright pages.</li>
+<li>OCR uses ML Kit text recognition to read page images on-device and add an invisible searchable text layer to a copy. Its model is supplied through Google Play services and may need to download before first use; the PDF itself is processed locally. The original remains unchanged. OCR currently expects upright pages.</li>
 </ul>
 <h2>3. Document scanner and third-party services</h2>
 <p>The optional document scanner uses Google ML Kit Document Scanner through Google Play services. Google Play services may need to download or update scanner components and are governed by Google's own terms and privacy practices. NexaPDF does not operate the scanner service. Review the <a href="https://policies.google.com/privacy">Google Privacy Policy</a> and <a href="https://developers.google.com/ml-kit/vision/doc-scanner">ML Kit Document Scanner documentation</a>.</p>
