@@ -17,7 +17,7 @@ NexaPDF lets you open and read PDFs, search selectable text locally, combine or 
 - When you save a result, you choose the destination. The app does not automatically upload the result.
 - The recent-documents list stores the selected document URI and display name locally in app preferences. It does not store the PDF contents.
 - PDF passwords entered to open or protect a document are used in memory for that operation. The current implementation does not intentionally save those passwords in app preferences or the recent-documents list.
-- OCR uses the bundled ML Kit text-recognition model to read page images on the device and add an invisible, searchable text layer to a copy. OCR is intended for upright scanned pages; the original remains unchanged.
+- OCR uses ML Kit text recognition to read page images on the device and add an invisible, searchable text layer to a copy. The OCR model is supplied through Google Play services and may need to download before first use; the PDF content is processed locally, not uploaded for recognition. OCR is intended for upright scanned pages; the original remains unchanged.
 
 ## 3. Document scanner and third-party services
 

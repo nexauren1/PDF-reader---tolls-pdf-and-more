@@ -17,7 +17,7 @@ NexaPDF is a privacy-first PDF workspace with a polished dark interface, Portugu
 - **Protect PDFs:** create a password-protected copy using standard PDF password encryption.
 - **Open protected PDFs:** ask for a password and use it transiently while the document is open.
 - **Scan documents:** use Google ML Kit Document Scanner through Google Play services and save the scan as PDF. Scanner availability and first-use component downloads depend on the device and Google Play services.
-- **Offline OCR:** use the bundled ML Kit text-recognition model on the device to add an invisible searchable text layer to scanned pages. OCR currently expects upright pages and is intended for image/scanned PDFs.
+- **Offline OCR:** use ML Kit text recognition on the device to add an invisible searchable text layer to scanned pages. The recognition model is supplied by Google Play services and may need to download before first use; PDF content is processed locally. OCR currently expects upright pages and is intended for image/scanned PDFs.
 - **Local history:** remember recent document references and names in app preferences. PDF contents are not stored in the recent list.
 - **Languages and theme:** Portuguese and English labels, dark theme, and a native bottom navigation bar.
 

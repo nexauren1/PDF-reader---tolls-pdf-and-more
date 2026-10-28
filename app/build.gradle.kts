@@ -44,6 +44,14 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }
     }
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("arm64-v8a", "armeabi-v7a")
+            isUniversalApk = false
+        }
+    }
     buildTypes {
         debug { applicationIdSuffix = ".debug"; versionNameSuffix = "-debug" }
         release {
@@ -74,7 +82,7 @@ dependencies {
     implementation("androidx.navigation:navigation-compose:2.8.7")
     implementation("com.tom-roush:pdfbox-android:2.0.27.0")
     implementation("com.google.android.gms:play-services-mlkit-document-scanner:16.0.0")
-    implementation("com.google.mlkit:text-recognition:16.0.1")
+    implementation("com.google.android.gms:play-services-mlkit-text-recognition:19.0.1")
     debugImplementation("androidx.compose.ui:ui-tooling")
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation(platform("androidx.compose:compose-bom:2025.02.00"))

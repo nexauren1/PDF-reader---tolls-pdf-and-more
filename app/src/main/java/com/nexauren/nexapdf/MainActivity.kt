@@ -876,7 +876,7 @@ private fun PdfOcrDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
-                    if (pt) "Esta ferramenta usa reconhecimento de texto no dispositivo e adiciona uma camada de texto pesquisável. É indicada para digitalizações. PDFs que já têm texto podem ganhar texto duplicado. O original fica intacto." else "This tool recognizes text on your device and adds a searchable text layer. It is intended for scans. PDFs that already contain text may get duplicate text. The original stays unchanged.",
+                    if (pt) "Esta ferramenta reconhece texto no dispositivo e adiciona uma camada pesquisável. É indicada para digitalizações; PDFs que já têm texto podem ganhar texto duplicado. O original fica intacto. Na primeira utilização, o Google Play services pode precisar de descarregar o modelo OCR; o PDF e o texto reconhecido não são enviados." else "This tool recognizes text on your device and adds a searchable text layer. It is intended for scans. PDFs that already contain text may get duplicate text. The original stays unchanged. Google Play services may need to download the OCR model before the first use; the PDF and recognized text are not uploaded.",
                     color = SecondaryText, fontSize = 12.sp, lineHeight = 17.sp
                 )
                 Text(
