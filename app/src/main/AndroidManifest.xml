@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <application android:allowBackup="false" android:label="NexaPDF" android:icon="@drawable/ic_nexapdf" android:roundIcon="@drawable/ic_nexapdf" android:supportsRtl="true" android:theme="@style/Theme.NexaPDF" android:usesCleartextTraffic="false">
+    <application android:allowBackup="false" android:label="NexaPDF" android:icon="@drawable/ic_nexapdf" android:roundIcon="@drawable/ic_nexapdf" android:supportsRtl="true" android:theme="@style/Theme.NexaPDF" android:usesCleartextTraffic="false">\n        <meta-data android:name="com.google.mlkit.vision.DEPENDENCIES" android:value="ocr" />
         <activity android:name=".MainActivity" android:configChanges="locale|layoutDirection|screenSize|orientation" android:exported="true">
             <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
         </activity>
